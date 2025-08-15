@@ -1,0 +1,113 @@
+#!/bin/sh
+# IMPORTANT : trigger switch will kill this pid if
+# buton release is seen.
+echo $$ > /tmp/resetwifi.pid
+
+amber=/sys/class/leds/amber/trigger
+white=/sys/class/leds/white/trigger
+white_delay_on=/sys/class/leds/white/delay_on
+white_delay_off=/sys/class/leds/white/delay_off
+amber_delay_on=/sys/class/leds/amber/delay_on
+amber_delay_off=/sys/class/leds/amber/delay_off
+
+amber_saved=$(cat $amber | cut -d'[' -f2 | cut -d']' -f1)
+white_saved=$(cat $white | cut -d'[' -f2 | cut -d']' -f1)
+
+if [ $amber_saved == "timer" ]; then
+    amber_delay_on_saved=$(cat $amber_delay_on)
+    amber_delay_off_saved=$(cat $amber_delay_off)
+fi
+
+if [ $white_saved == "timer" ]; then
+    white_delay_on_saved=$(cat $white_delay_on)
+    white_delay_off_saved=$(cat $white_delay_off)
+fi
+
+cleanup() {
+    echo $amber_saved > $amber
+
+    if [ $amber_saved == "timer" ]; then
+        echo $amber_delay_on_saved > $amber_delay_on
+        echo $amber_delay_off_saved > $amber_delay_off
+    fi
+#change white led to toggle state as canceling reset script meaning state has to change
+    if [ $white_saved == "timer" ]; then
+    	echo $white_saved > $white
+        echo $white_delay_on_saved > $white_delay_on
+        echo $white_delay_off_saved > $white_delay_off
+    elif [ $white_saved == "none" ]; then
+    	echo default-on > $white
+    elif [ $white_saved == "default-on" ]; then
+    	echo none > $white
+    else
+    	echo $white_saved > $white
+    fi
+
+    rm -f /tmp/resetwifi.pid
+    exit
+}
+
+
+sleep 2
+#install trap only if we are going to change leds
+trap cleanup SIGHUP SIGINT SIGTERM
+echo none > $white
+echo default-on > $amber
+sleep 3
+
+# Let's steal the gpio control from gpio-button-hotplug
+rmmod gpio_button_hotplug
+# Check if gpio23 is still pressed
+echo 23 > /sys/class/gpio/export
+if [ $(cat /sys/class/gpio/gpio23/value) -eq 1 ];then
+    # button released, no action required.
+    # give back the gpio23 control back to gpio-button-hotplug
+    echo 23 > /sys/class/gpio/unexport
+    modprobe gpio-button-hotplug
+    # LED's back to default
+    echo none > $amber
+    echo timer > $white
+    exit 0
+fi
+
+rm -f /tmp/resetwifi.pid
+# now we passed the timer, we will reset wifi...
+echo none > $amber
+echo none > $white
+echo timer > $white
+echo 360 > $white_delay_off
+echo 140 > $white_delay_on
+sleep 3
+echo default-on > $white
+sleep 1.5
+echo none > $white
+
+logger "WIFI Resetting..."
+/sbin/nvram_set wemo_ipaddr=
+/sbin/nvram_set restore_state=1
+/sbin/nvram_set ClientSSID=
+killall wemoApp
+
+ifconfig apcli0 down
+ifconfig ra0 down
+rmmod mt7628
+sleep 1
+modprobe mt7628
+sleep 1
+ifconfig ra0 up
+iwpriv ra0 set airplayEnable=1
+
+killall -9 wemo_ctrl
+killall -9 wemohap
+
+# let /sbin/startWemoHK.sh handle restarting wemo_ctrl and wemohap.
+# /sbin/wemo_ctrl&
+# sleep 1
+# /sbin/wemohap&
+
+# restore gpio-button-hotplug
+echo 23 > /sys/class/gpio/unexport
+
+modprobe gpio-button-hotplug
+
+cleanup

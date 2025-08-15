@@ -1,0 +1,523 @@
+Index: libupnp-1.14.0/upnp/src/gena/gena_device.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/gena/gena_device.c
++++ libupnp-1.14.0/upnp/src/gena/gena_device.c
+@@ -273,7 +273,9 @@ static int genaNotify(
+ 	char *propertySet,
+ 	/*! [in] subscription to be Notified, assumes this is valid for life of
+ 	   function. */
+-	subscription *sub)
++	subscription *sub,
++	/*! [out] IP address to be notified */
++	char *ip_address)
+ {
+ 	size_t i;
+ 	membuffer mid_msg;
+@@ -303,6 +305,9 @@ static int genaNotify(
+ 			url, &mid_msg, propertySet, &response);
+ 		if (return_code == UPNP_E_SUCCESS)
+ 			break;
++        else {
++            strncpy(ip_address, url->hostport.text.buff, url->hostport.text.size);
++        }
+ 	}
+ 	membuffer_destroy(&mid_msg);
+ 	if (return_code == UPNP_E_SUCCESS) {
+@@ -310,12 +315,15 @@ static int genaNotify(
+ 			return_code = GENA_SUCCESS;
+ 		else {
+ 			if (response.msg.status_code ==
+-				HTTP_PRECONDITION_FAILED)
++				HTTP_PRECONDITION_FAILED) {
+ 				/*Invalid SID gets removed */
+ 				return_code =
+ 					GENA_E_NOTIFY_UNACCEPTED_REMOVE_SUB;
+-			else
++				strncpy(ip_address, url->hostport.text.buff, url->hostport.text.size);
++            }
++			else {
+ 				return_code = GENA_E_NOTIFY_UNACCEPTED;
++            }
+ 		}
+ 		httpmsg_destroy(&response.msg);
+ 	}
+@@ -323,6 +331,30 @@ static int genaNotify(
+ 	return return_code;
+ }
+ 
++#define MAX_NOTIFY_FAIL_CNT 1
++static pthread_attr_t attr;
++static pthread_t thread = -1;
++
++void *advThread(void *arg)
++{
++	char ipaddr[20];
++	int dev_handle;
++	char *ptr;
++
++	memset(ipaddr, 0, sizeof(ipaddr));
++	memcpy(&dev_handle, (char *)arg, sizeof(int));
++	ptr = (char *)arg + sizeof(int);
++	memcpy(ipaddr, ptr, strlen(ptr)+1);
++
++	free(arg);
++
++	sleep(1);
++	UpnpSendAdvertisementLowPower(dev_handle, 86400, -1, -1, -1, 2, ipaddr);
++	fflush(stdout);
++	thread=-1;
++    return NULL;
++}
++
+ /*!
+  * \brief Thread job to Notify a control point.
+  *
+@@ -342,6 +374,10 @@ static void genaNotifyThread(
+ 	notify_thread_struct *in = (notify_thread_struct *)input;
+ 	int return_code;
+ 	struct Handle_Info *handle_info;
++	char hostaddr[30];
++	char *ipaddr = NULL;
++	char *data = NULL;
++	char *strtok_r_temp;
+ 
+ 	/* This should be a HandleLock and not a HandleReadLock otherwise if
+ 	 * there is a lot of notifications, then multiple threads will acquire a
+@@ -370,7 +406,11 @@ static void genaNotifyThread(
+ 	HandleUnlock();
+ 
+ 	/* send the notify */
+-	return_code = genaNotify(in->headers, in->propertySet, &sub_copy);
++    memset(hostaddr, 0, sizeof(hostaddr));
++	return_code = genaNotify(in->headers, in->propertySet, &sub_copy, hostaddr);
++    if (return_code == GENA_E_NOTIFY_UNACCEPTED_REMOVE_SUB) {
++        ipaddr = strtok_r(hostaddr, ":", &strtok_r_temp);
++    }
+ 	freeSubscription(&sub_copy);
+ 	HandleLock();
+ 	if (GetHandleInfo(in->device_handle, &handle_info) != HND_DEVICE) {
+@@ -387,7 +427,7 @@ static void genaNotifyThread(
+ 		HandleUnlock();
+ 		return;
+ 	}
+-	sub->ToSendEventKey++;
++	//sub->ToSendEventKey++;
+ 	if (sub->ToSendEventKey < 0)
+ 		/* wrap to 1 for overflow */
+ 		sub->ToSendEventKey = 1;
+@@ -410,8 +450,26 @@ static void genaNotifyThread(
+ 		}
+ 	}
+ 
+-	if (return_code == GENA_E_NOTIFY_UNACCEPTED_REMOVE_SUB)
++	if (return_code == GENA_E_NOTIFY_UNACCEPTED_REMOVE_SUB) {
++		data = (char *)malloc(sizeof(int) + 20);
++		/* Any failure, it will be removed since it is http request */
+ 		RemoveSubscriptionSID(in->sid, service);
++
++		/* Send UPnP advertisement */
++		if((data != NULL) && (thread == -1) && ipaddr) {
++			memset(data, 0, sizeof(int) + 20);
++			memcpy(data, &(in->device_handle), sizeof(int));
++
++			/* fill in the IP address */
++			memcpy(data+sizeof(int), ipaddr, strlen(ipaddr)+1);
++			pthread_attr_init(&attr);
++			pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_DETACHED);
++			pthread_create(&thread,&attr,
++					&advThread, (void *)data);
++		}
++		else if(data != NULL)
++			free(data);
++	}
+ 	free_notify_struct(in);
+ 
+ 	HandleUnlock();
+@@ -1279,7 +1337,7 @@ int gena_validate_delivery_urls(
+ 					gIF_IPV4,
+ 					gIF_IPV4_NETMASK
+ 					);
+-                printf("DeliveryURL %s is invalid.\n");
++                printf("DeliveryURL %s is invalid.\n", deliveryAddrString);
+ 			      return -1;
+ 			}
+ 		}
+@@ -1326,6 +1384,34 @@ int gena_validate_delivery_urls(
+ 	return 0;
+ }
+ 
++int check_existing_entry(const char *url_entry, service_info *service, subscription **sub)
++{
++	/* url_entry should be of the form IPAddress:port */
++	char *ipaddr;
++	subscription *subscriptionList = service->subscriptionList;
++	int return_code;
++	char url_entry_copy[100] = {'\0'};
++
++	strncpy(url_entry_copy, url_entry, 100-1);
++	ipaddr = strtok(url_entry_copy, ":");
++
++	while(subscriptionList != NULL) {
++		if(strstr(subscriptionList->DeliveryURLs.parsedURLs[0].hostport.text.buff, ipaddr)) {
++			*sub = subscriptionList;
++			return_code = UPNP_E_ALREADY_REGISTERED;
++			break;
++		}
++		else {
++			subscriptionList = subscriptionList->next;
++		}
++	}
++
++	if(!subscriptionList)
++		return_code = UPNP_E_SUCCESS;
++
++	return return_code;
++}
++
+ void gena_process_subscription_request(SOCKINFO *info, http_message_t *request)
+ {
+ 	UpnpSubscriptionRequest *request_struct = UpnpSubscriptionRequest_new();
+@@ -1334,6 +1420,7 @@ void gena_process_subscription_request(S
+ 	int time_out = 1801;
+ 	service_info *service;
+ 	subscription *sub;
++    subscription *sub_entry;
+ 	uuid_upnp uid;
+ 	struct Handle_Info *handle_info;
+ 	void *cookie;
+@@ -1344,7 +1431,9 @@ void gena_process_subscription_request(S
+ 	memptr callback_hdr;
+ 	memptr timeout_hdr;
+ 	int rc = 0;
+-    struct timespec now;
++        struct timespec now;
++	URL_list DeliveryURLs;
++	uri_type *url;
+ 
+ 	UpnpPrintf(UPNP_INFO,
+ 		GENA,
+@@ -1468,6 +1557,12 @@ void gena_process_subscription_request(S
+ 		HandleUnlock();
+ 		goto exit_function;
+ 	}
++	/* If we have found a valid delivery url, parse it to find IP address and see if its entry exists */
++	url = &DeliveryURLs.parsedURLs[0];
++	return_code = check_existing_entry(url->hostport.text.buff, service, &sub_entry);
++	if(return_code == UPNP_E_ALREADY_REGISTERED) {
++        RemoveSubscriptionSID( sub_entry->sid, service );
++	}
+ 	/* set the timeout */
+ 	if (httpmsg_find_hdr(request, HDR_TIMEOUT, &timeout_hdr) != NULL) {
+ 		if (matchstr(timeout_hdr.buf,
+@@ -1492,8 +1587,8 @@ void gena_process_subscription_request(S
+ 		}
+ 	}
+ 	if (time_out >= 0) {
+-      clock_gettime(CLOCK_MONOTONIC,&now);
+-      sub->expireTime = now.tv_sec + time_out;
++		clock_gettime(CLOCK_MONOTONIC,&now);
++		sub->expireTime = time(NULL) + time_out;
+ 	} else {
+ 		/* infinite time */
+ 		sub->expireTime = 0;
+Index: libupnp-1.14.0/upnp/src/inc/ssdplib.h
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/inc/ssdplib.h
++++ libupnp-1.14.0/upnp/src/inc/ssdplib.h
+@@ -197,7 +197,8 @@ int AdvertiseAndReply(
+ 	/* [in] Service type. */
+ 	char *ServiceType,
+ 	/* [in] Advertisement age. */
+-	int Exp);
++	int Exp,
++    char *UnicastIP);
+ 
+ /*!
+  * \brief Fills the fields of the event structure like DeviceType, Device UDN
+@@ -344,6 +345,9 @@ static UPNP_INLINE void ssdp_handle_devi
+ 	struct sockaddr_storage *dest_addr) {}
+ #endif /* INCLUDE_DEVICE_APIS */
+ 
++int UnicastAdvertisement(char *DevType, int RootDev, char *Udn, char *Location,
++			int Duration, int AddressFamily, int PowerState,
++			int SleepPeriod, int RegistrationState, char *UnicastIP);
+ /*!
+  * \brief Creates the device advertisement request based on the input
+  * parameter, and send it to the multicast channel.
+@@ -451,7 +455,9 @@ int ServiceAdvertisement(
+ 	/* [in] SleepPeriod as defined by UPnP Low Power. */
+ 	int SleepPeriod,
+ 	/* [in] RegistrationState as defined by UPnP Low Power. */
+-	int RegistrationState);
++	int RegistrationState,
++    /* [in] IP address the service advertisement to be sent */
++    char *UnitcastIP);
+ 
+ /*!
+  * \brief Creates the advertisement packet based on the input parameter,
+Index: libupnp-1.14.0/upnp/src/ssdp/ssdp_device.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/ssdp/ssdp_device.c
++++ libupnp-1.14.0/upnp/src/ssdp/ssdp_device.c
+@@ -76,7 +76,7 @@ void advertiseAndReplyThread(void *data)
+ 			  arg->event.RequestType,
+ 			  (struct sockaddr *)&arg->dest_addr,
+ 			  arg->event.DeviceType,
+-			  arg->event.UDN, arg->event.ServiceType, arg->MaxAge);
++              arg->event.UDN, arg->event.ServiceType, arg->MaxAge, NULL);
+ 
+ 	time (&rawtime);
+ 	otTime = ctime(&rawtime);
+@@ -531,6 +531,97 @@ static void CreateServicePacket(
+ 	return;
+ }
+ 
++int UnicastAdvertisement(char *DevType, int RootDev, char *Udn, char *Location,
++			int Duration, int AddressFamily, int PowerState,
++			int SleepPeriod, int RegistrationState, char *UnicastIP)
++{
++	struct sockaddr_storage __ss;
++	struct sockaddr_in *DestAddr4 = (struct sockaddr_in *)&__ss;
++	struct sockaddr_in6 *DestAddr6 = (struct sockaddr_in6 *)&__ss;
++	/* char Mil_Nt[LINE_SIZE] */
++	char Mil_Usn[LINE_SIZE];
++	char *msgs[3];
++	int ret_code = UPNP_E_OUTOF_MEMORY;
++	int rc = 0;
++
++	UpnpPrintf(UPNP_INFO, SSDP, __FILE__, __LINE__,
++		   "In function UnicastAdvertisement\n");
++	memset(&__ss, 0, sizeof(__ss));
++	switch (AddressFamily) {
++	case AF_INET:
++		DestAddr4->sin_family = (sa_family_t)AF_INET;
++		if(UnicastIP)
++		{
++			inet_pton(AF_INET, UnicastIP, &DestAddr4->sin_addr);
++		}
++		else
++		{
++			inet_pton(AF_INET, SSDP_IP, &DestAddr4->sin_addr);
++		}
++		DestAddr4->sin_port = htons(SSDP_PORT);
++		break;
++	case AF_INET6:
++		DestAddr6->sin6_family = (sa_family_t)AF_INET6;
++		inet_pton(AF_INET6,
++			  (isUrlV6UlaGua(Location)) ? SSDP_IPV6_SITELOCAL :
++			  SSDP_IPV6_LINKLOCAL, &DestAddr6->sin6_addr);
++		DestAddr6->sin6_port = htons(SSDP_PORT);
++		DestAddr6->sin6_scope_id = gIF_INDEX;
++		break;
++	default:
++		UpnpPrintf(UPNP_CRITICAL, SSDP, __FILE__, __LINE__,
++			   "Invalid device address family.\n");
++	}
++	msgs[0] = NULL;
++	msgs[1] = NULL;
++	msgs[2] = NULL;
++	/* If deviceis a root device , here we need to send 3 advertisement
++	 * or reply */
++	if (RootDev) {
++		rc = snprintf(Mil_Usn, sizeof(Mil_Usn), "%s::upnp:rootdevice",
++			Udn);
++		if (rc < 0 || (unsigned int) rc >= sizeof(Mil_Usn))
++			goto error_handler;
++		CreateServicePacket(MSGTYPE_ADVERTISEMENT, "upnp:rootdevice",
++				    Mil_Usn, Location, Duration, &msgs[0],
++				    AddressFamily, PowerState, SleepPeriod,
++				    RegistrationState);
++	}
++	/* both root and sub-devices need to send these two messages */
++	CreateServicePacket(MSGTYPE_ADVERTISEMENT, Udn, Udn,
++			    Location, Duration, &msgs[1], AddressFamily,
++			    PowerState, SleepPeriod, RegistrationState);
++	rc = snprintf(Mil_Usn, sizeof(Mil_Usn), "%s::%s", Udn, DevType);
++	if (rc < 0 || (unsigned int) rc >= sizeof(Mil_Usn))
++		goto error_handler;
++	CreateServicePacket(MSGTYPE_ADVERTISEMENT, DevType, Mil_Usn,
++			    Location, Duration, &msgs[2], AddressFamily,
++			    PowerState, SleepPeriod, RegistrationState);
++	/* check error */
++	if ((RootDev && msgs[0] == NULL) || msgs[1] == NULL || msgs[2] == NULL) {
++		goto error_handler;
++	}
++	/* send packets */
++	if (RootDev) {
++		/* send 3 msg types */
++		ret_code =
++		    NewRequestHandler((struct sockaddr *)&__ss, 3, &msgs[0]);
++	} else {		/* sub-device */
++
++		/* send 2 msg types */
++		ret_code =
++		    NewRequestHandler((struct sockaddr *)&__ss, 2, &msgs[1]);
++	}
++
++error_handler:
++	/* free msgs */
++	if(msgs[0]) free(msgs[0]);
++	if(msgs[1]) free(msgs[1]);
++	if(msgs[2]) free(msgs[2]);
++
++	return ret_code;
++}
++
+ int DeviceAdvertisement(char *DevType, int RootDev, char *Udn, char *Location,
+ 			int Duration, int AddressFamily, int PowerState,
+ 			int SleepPeriod, int RegistrationState)
+@@ -814,7 +905,8 @@ error_handler:
+ 
+ int ServiceAdvertisement(char *Udn, char *ServType, char *Location,
+ 			 int Duration, int AddressFamily,
+-			 int PowerState, int SleepPeriod, int RegistrationState)
++             int PowerState, int SleepPeriod, int RegistrationState,
++             char *UnicastIP)
+ {
+ 	char Mil_Usn[LINE_SIZE];
+ 	char *szReq[1];
+@@ -829,7 +921,12 @@ int ServiceAdvertisement(char *Udn, char
+ 	switch (AddressFamily) {
+ 	case AF_INET:
+ 		DestAddr4->sin_family = (sa_family_t)AddressFamily;
+-		inet_pton(AF_INET, SSDP_IP, &DestAddr4->sin_addr);
++        if (UnicastIP) {
++            inet_pton(AF_INET, UnicastIP, &DestAddr4->sin_addr);
++        }
++        else {
++            inet_pton(AF_INET, SSDP_IP, &DestAddr4->sin_addr);
++        }
+ 		DestAddr4->sin_port = htons(SSDP_PORT);
+ 		break;
+ 	case AF_INET6:
+Index: libupnp-1.14.0/upnp/src/ssdp/ssdp_server.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/ssdp/ssdp_server.c
++++ libupnp-1.14.0/upnp/src/ssdp/ssdp_server.c
+@@ -102,7 +102,8 @@ int AdvertiseAndReply(int AdFlag,
+ 	char *DeviceType,
+ 	char *DeviceUDN,
+ 	char *ServiceType,
+-	int Exp)
++    int Exp,
++    char *UnicastIP)
+ {
+ 	int retVal = UPNP_E_SUCCESS;
+ 	long unsigned int i;
+@@ -286,6 +287,15 @@ int AdvertiseAndReply(int AdFlag,
+ 						SInfo->PowerState,
+ 						SInfo->SleepPeriod,
+ 						SInfo->RegistrationState);
++				} else if (AdFlag == 2) {
++					int err = UnicastAdvertisement(devType, i == 0lu,
++							    UDNstr,
++							    SInfo->DescURL, Exp,
++							    SInfo->DeviceAf,
++							    SInfo->PowerState,
++                                SInfo->SleepPeriod,
++                                SInfo->RegistrationState,
++							    UnicastIP);
+ 				} else {
+ 					/* AdFlag == -1 */
+ 					DeviceShutdown(devType,
+@@ -467,7 +477,16 @@ int AdvertiseAndReply(int AdFlag,
+ 							SInfo->DeviceAf,
+ 							SInfo->PowerState,
+ 							SInfo->SleepPeriod,
+-							SInfo->RegistrationState);
++                            SInfo->RegistrationState,
++							NULL);
++					} else if (AdFlag == 2) {
++						ServiceAdvertisement(UDNstr,
++							servType, SInfo->DescURL,
++							Exp, SInfo->DeviceAf,
++							SInfo->PowerState,
++							SInfo->SleepPeriod,
++							SInfo->RegistrationState,
++                            UnicastIP);
+ 					} else {
+ 						/* AdFlag == -1 */
+ 						ServiceShutdown(UDNstr,
+@@ -1155,6 +1174,7 @@ static int create_ssdp_sock_v6(
+ 	struct sockaddr_in6 *ssdpAddr6 = (struct sockaddr_in6 *)&__ss;
+ 	int onOff;
+ 	int ret = 0;
++    uint32_t *p = NULL;
+ 
+ 	*ssdpSock = socket(AF_INET6, SOCK_DGRAM, 0);
+ 	if (*ssdpSock == INVALID_SOCKET) {
+@@ -1251,7 +1271,7 @@ static int create_ssdp_sock_v6(
+ 		sizeof(ssdpMcastAddr));
+ 	if (ret == -1) {
+ 		strerror_r(errno, errorBuffer, ERROR_BUFFER_LEN);
+-		uint32_t *p = (uint32_t *)&ssdpMcastAddr.ipv6mr_multiaddr;
++		p = (uint32_t *)&ssdpMcastAddr.ipv6mr_multiaddr;
+ 		UpnpPrintf(UPNP_CRITICAL,
+ 			SSDP,
+ 			__FILE__,
+Index: libupnp-1.14.0/upnp/inc/upnp.h
+===================================================================
+--- libupnp-1.14.0.orig/upnp/inc/upnp.h
++++ libupnp-1.14.0/upnp/inc/upnp.h
+@@ -1162,7 +1162,9 @@ EXPORT_SPEC int UpnpSendAdvertisementLow
+ 	/*! SleepPeriod as defined by UPnP Low Power. */
+ 	int SleepPeriod,
+ 	/*! RegistrationState as defined by UPnP Low Power. */
+-	int RegistrationState);
++	int RegistrationState,
++    int AdvFlag,
++    char *UnicastIP);
+ 
+ /* @} Discovery */
+ 
+Index: libupnp-1.14.0/upnp/src/api/upnpapi.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/api/upnpapi.c
++++ libupnp-1.14.0/upnp/src/api/upnpapi.c
+@@ -1446,7 +1446,8 @@ int UpnpUnRegisterRootDeviceLowPower(Upn
+ 		(char *)NULL,
+ 		(char *)NULL,
+ 		(char *)NULL,
+-		HInfo->MaxAge);
++        HInfo->MaxAge,
++        NULL);
+ #endif
+ 
+ 	HandleLock();
+@@ -1840,14 +1841,16 @@ int UpnpSendAdvertisement(UpnpDevice_Han
+ 		__FILE__,
+ 		__LINE__,
+ 		"Inside UpnpSendAdvertisement \n");
+-	return UpnpSendAdvertisementLowPower(Hnd, Exp, -1, -1, -1);
++	return UpnpSendAdvertisementLowPower(Hnd, Exp, -1, -1, -1, 1, NULL);
+ }
+ 
+ int UpnpSendAdvertisementLowPower(UpnpDevice_Handle Hnd,
+ 	int Exp,
+ 	int PowerState,
+ 	int SleepPeriod,
+-	int RegistrationState)
++    int RegistrationState,
++    int AdvFlag,
++    char *UnicastIP)
+ {
+ 	struct Handle_Info *SInfo = NULL;
+ 	int retVal = 0, *ptrMx;
+@@ -1885,14 +1888,15 @@ int UpnpSendAdvertisementLowPower(UpnpDe
+ 	SInfo->SleepPeriod = SleepPeriod;
+ 	SInfo->RegistrationState = RegistrationState;
+ 	HandleUnlock();
+-	retVal = AdvertiseAndReply(1,
++	retVal = AdvertiseAndReply(AdvFlag,
+ 		Hnd,
+ 		(enum SsdpSearchType)0,
+ 		(struct sockaddr *)NULL,
+ 		(char *)NULL,
+ 		(char *)NULL,
+ 		(char *)NULL,
+-		Exp);
++        Exp,
++        UnicastIP);
+ 
+ 	if (retVal != UPNP_E_SUCCESS)
+ 		return retVal;

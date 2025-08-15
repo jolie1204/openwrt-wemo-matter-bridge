@@ -1,0 +1,168 @@
+Index: libupnp-1.14.0/upnp/src/genlib/net/http/webserver.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/genlib/net/http/webserver.c
++++ libupnp-1.14.0/upnp/src/genlib/net/http/webserver.c
+@@ -139,6 +139,17 @@ static const char *gMediaTypes[] = {
+ 	#define NUM_HTTP_HEADER_NAMES 33
+ 
+ 	#define ASCTIME_R_BUFFER_SIZE 26
++/* File whitelist */
++
++char *WhiteList[] = {
++   "/tmp/Belkin_settings/rules.db",
++   "/tmp/Belkin_settings/icon.jpg",
++   NULL     /* End of Table */
++};
++
++extern int gWebIconVersion;
++extern volatile int gRestartRuleEngine;
++
+ 	#ifdef _WIN32
+ static char *web_server_asctime_r(const struct tm *tm, char *buf)
+ {
+@@ -1164,6 +1175,7 @@ static int process_request(
+ 	int alias_grabbed;
+ 	size_t dummy;
+ 	memptr hdr_value;
++	char abspath [PATH_MAX+1];
+ 
+ 	print_http_headers(req);
+ 	url = &req->uri;
+@@ -1307,6 +1319,22 @@ static int process_request(
+ 			filename->buf[filename->length - 1] == '/') {
+ 			membuffer_delete(filename, filename->length - 1, 1);
+ 		}
++
++		/* [WEMO-41986] - check global buffer before using. 
++         *		It might be NULL in un-expected cases and crash in strstr() */
++		if (gDocumentRootDir.buf == NULL) {
++			goto error_handler;
++		}
++
++		/* BT: not process request for webroot symlink */
++		memset(abspath, 0x0, sizeof(abspath));
++	    realpath (filename->buf, abspath);
++
++		if(0x0 == strstr(abspath, gDocumentRootDir.buf)){
++			err_code = HTTP_NOT_FOUND;
++			goto error_handler;
++		}
++
+ 		if (req->method != HTTPMETHOD_POST) {
+ 			/* get info on file */
+ 			if (get_file_info(filename->buf, finfo) != 0) {
+@@ -1524,6 +1552,64 @@ error_handler:
+ 	return err_code;
+ }
+ 
++#define MAX_FILE_LINE	    256
++
++int UpdateXML()
++{
++    FILE* pfReadStream  = 0x00;
++    FILE* pfWriteStream = 0x00;
++    char szBuff[MAX_FILE_LINE];
++    char szBuff1[MAX_FILE_LINE];
++    char *strtok_r_temp;
++    int port = 0;
++    char *pch = NULL, *pch2 = NULL;
++
++    memset(szBuff, 0x00, sizeof(szBuff));
++    strncpy(szBuff, "cp /tmp/Belkin_settings/setup.xml /tmp/setup.xml", MAX_FILE_LINE);
++    system(szBuff);
++
++    pfReadStream  = fopen("/tmp/setup.xml", "r");
++    pfWriteStream = fopen("/tmp/Belkin_settings/setup.xml", "w");
++
++    if (0x00 == pfReadStream || 0x00 == pfWriteStream) {
++        if(pfReadStream)
++            fclose(pfReadStream);
++
++        if(pfWriteStream)
++            fclose(pfWriteStream);
++
++        return 1;
++    }
++
++    while (!feof(pfReadStream)) {
++        memset(szBuff, 0x00, sizeof(szBuff));
++
++        fgets(szBuff, MAX_FILE_LINE, pfReadStream);
++
++        if (strstr(szBuff, "iconVersion")) {
++            memset(szBuff1, 0x00, sizeof(szBuff1));
++
++            pch = strtok_r(szBuff, "|",&strtok_r_temp);
++            pch2 = strtok_r(NULL, "|",&strtok_r_temp);
++
++            pch = strtok_r(pch2, "<",&strtok_r_temp);
++            if(pch) {
++                port = atoi(pch);
++            }
++	
++            snprintf(szBuff1, MAX_FILE_LINE, "<iconVersion>%d|%d</iconVersion>\n", gWebIconVersion, port);
++            strcpy(szBuff, szBuff1);
++        }
++
++        fwrite(szBuff, 1, strlen(szBuff), pfWriteStream);
++    }
++
++    fclose(pfReadStream);
++    fclose(pfWriteStream);
++
++    return 0x00;
++}
++
+ /*!
+  * \brief Receives the HTTP post message.
+  *
+@@ -1554,6 +1640,37 @@ static int http_RecvPostMessage(
+ 	size_t entity_offset = 0;
+ 	int num_read = 0;
+ 	int ret_code = HTTP_OK;
++    int i;
++    char cmd[LINE_SIZE];
++
++    /* WEMO-46984: Only allow files in white list to be POSTed */
++    for(i = 0; WhiteList[i] != NULL; i++) {
++        if(strcmp(WhiteList[i],filename) == 0) {
++            /* Allowed file */
++            break;
++        }
++    }
++
++    if(WhiteList[i] == NULL) {
++        return HTTP_FORBIDDEN;
++    }
++
++    if (0x00 != strstr(filename, "rules.db")) {
++        sprintf(cmd, "%s", "cp -f /tmp/Belkin_settings/rules.db /tmp/Belkin_settings/rules1.db");
++        system(cmd);
++
++        if(1 == gRestartRuleEngine) {
++            printf("\n%s:%s:%d:Restart rules engine now...\n", __FILE__, __FUNCTION__, __LINE__);
++            gRestartRuleEngine = 2; /* RULE_ENGINE_RELOAD */
++        }
++    }
++    else if (0x00 != strstr(filename, "icon.jpg")) {
++		gWebIconVersion++;
++
++        sprintf(cmd, "%s=%d", "nvram_set IconVersion", gWebIconVersion);
++        system(cmd);
++		UpdateXML();
++	}
+ 
+ 	if (Instr && Instr->IsVirtualFile) {
+ 		Fp = (virtualDirCallback.open)(filename,
+@@ -1587,6 +1704,11 @@ static int http_RecvPostMessage(
+ 			goto ExitFunction;
+ 		}
+ 		/* read more if necessary entity */
++        if (parser->msg.entity.length > 256 * 1024) {
++            unlink(filename);
++            ret_code = HTTP_BAD_REQUEST;
++            goto ExitFunction;
++        }
+ 		while (entity_offset + Data_Buf_Size >
+ 				parser->msg.entity.length &&
+ 			parser->position != POS_COMPLETE) {

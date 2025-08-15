@@ -1,0 +1,56 @@
+#!/bin/sh
+if [ -f /tmp/longpress.pid ]; then
+    kill $(cat /tmp/longpress.pid)
+fi
+
+if [ -f /tmp/AutoOffInLastMin ]; then
+    touch /tmp/ButtonPressedWhenInLastMinOfAutoOff
+    exit
+fi
+
+NWAY=`nvram get nWay`
+
+if [ ! -d /sys/class/gpio/gpio19 ]; then
+    echo -n 19 > /sys/class/gpio/export
+    echo out > /sys/class/gpio/gpio19/direction
+fi
+
+if [ "$NWAY" == "3" ] ; then
+    if [ ! -d /sys/class/gpio/gpio29 ]; then
+        echo -n 29 > /sys/class/gpio/export
+        echo out > /sys/class/gpio/gpio29/direction
+    fi
+fi
+
+status=$(cat /sys/class/gpio/gpio19/value)
+led_saved=$(cat /sys/class/pwm/pwmchip0/pwm1/period)
+
+if [ $status -eq 0 ]; then
+    echo -n 1 > /sys/class/gpio/gpio19/value
+    if [ "$NWAY" == "3" ] ; then
+        echo -n 0 > /sys/class/gpio/gpio29/value
+    fi
+else
+    if [ "$NWAY" == "3" ] ; then
+        echo -n 1 > /sys/class/gpio/gpio29/value
+    fi
+    echo -n 0 > /sys/class/gpio/gpio19/value
+fi
+
+pidof_wemo=$(pidof wemoApp)
+
+if [ -n "$pidof_wemo" ]; then
+    touch /tmp/button_toggle
+fi
+
+if [ "$NWAY" != "3" ] ; then
+    # Only change LED if it is in normal operating condition
+    if [ $led_saved == "5" ] || [ $led_saved == "6" ]; then
+        status=$(cat /sys/class/gpio/gpio19/value)
+        if [ $status -eq 0 ]; then
+            echo 6 > /sys/class/pwm/pwmchip0/pwm1/period
+        else
+            echo 5 > /sys/class/pwm/pwmchip0/pwm1/period
+        fi
+    fi
+fi

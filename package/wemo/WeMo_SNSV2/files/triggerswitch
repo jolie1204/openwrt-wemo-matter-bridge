@@ -1,0 +1,33 @@
+#!/bin/sh
+white=/sys/class/leds/white/trigger
+amber=/sys/class/leds/amber/trigger
+
+if [ -f /tmp/resetwifi.pid ]; then
+    kill $(cat /tmp/resetwifi.pid)
+fi
+
+if [ -f /tmp/AutoOffInLastMin ]; then
+	touch /tmp/ButtonPressedWhenInLastMinOfAutoOff
+	exit
+fi
+
+if [ ! -d /sys/class/gpio/gpio19 ]; then
+   echo -n 19 > /sys/class/gpio/export
+   echo out > /sys/class/gpio/gpio19/direction
+fi
+
+status=$(cat /sys/class/gpio/gpio19/value)
+amber_saved=$(cat $amber | cut -d'[' -f2 | cut -d']' -f1)
+if [ $status -eq 0 ]; then
+   echo -n 1 > /sys/class/gpio/gpio19/value
+# check for error condition before changing led status
+   if [ $amber_saved == "none" ]; then
+       echo default-on > $white
+   fi
+else
+   echo -n 0 > /sys/class/gpio/gpio19/value
+# check for error condition before changing led status
+   if [ $amber_saved == "none" ]; then
+       echo none > $white
+   fi
+fi

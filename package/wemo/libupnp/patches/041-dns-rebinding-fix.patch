@@ -1,0 +1,40 @@
+Index: libupnp-1.14.0/upnp/src/genlib/net/http/httpparser.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/genlib/net/http/httpparser.c
++++ libupnp-1.14.0/upnp/src/genlib/net/http/httpparser.c
+@@ -47,6 +47,7 @@
+ #include "statcodes.h"
+ #include "unixutil.h"
+ #include "upnpdebug.h"
++#include "upnpapi.h"
+ 
+ #include <assert.h>
+ #include <ctype.h>
+@@ -1471,6 +1472,8 @@ parse_status_t parser_parse_headers(http
+ 	char save_char;
+ 	int ret2;
+ 	static char zero = 0;
++    char *buf = NULL;
++    char tmp_buf[128];
+ 
+ 	assert(parser->position == (parser_pos_t)POS_HEADERS ||
+ 	       parser->ent_position == ENTREAD_CHUNKY_HEADERS);
+@@ -1513,6 +1516,18 @@ parse_status_t parser_parse_headers(http
+ 		    map_str_to_int(token.buf, token.length, Http_Header_Names,
+ 				   NUM_HTTP_HEADER_NAMES, 0);
+ 		if (index != -1) {
++            if (Http_Header_Names[index].id == HDR_HOST) {
++                memset(tmp_buf, 0, 128);
++                memcpy(tmp_buf, hdr_value.buf, 128);
++                buf = strtok(tmp_buf, ":\r\n");
++                if ((strcmp(buf, gIF_IPV4) != 0)
++                    && (strcmp(buf, "239.255.255.250") != 0)
++                    && (strcmp(buf, "127.0.0.1") != 0)) {
++                    printf("HOST: %s\n", buf);
++                    parser->http_error_code = HTTP_INTERNAL_SERVER_ERROR;
++                    return PARSE_FAILURE;
++                }
++            }
+ 			/*Check if it is a soap header */
+ 			if (Http_Header_Names[index].id == HDR_SOAPACTION) {
+ 				parser->msg.method = SOAPMETHOD_POST;

@@ -29,6 +29,20 @@ define Build/ravpower-wd009-factory
 endef
 
 
+define Device/belkin_wemo
+  IMAGE_SIZE := 7424k
+  DEVICE_VENDOR := Belkin
+  DEVICE_MODEL := wemo
+#  DEVICE_PACKAGES := kmod-usb2 kmod-usb-ohci kmod-usb-ledtrig-usbport \
+#	kmod-mmc-mtk
+#  DEVICE_PACKAGES := kmod-mt76
+  DEVICE_PACKAGES := kmod-mt76x2
+  SUPPORTED_DEVICES += wemo
+  SUPPORTED_DEVICES += mt7628
+  IMAGE/sysupgrade.bin := append-kernel | pad-to $$$$(BLOCKSIZE) | append-rootfs
+endef
+TARGET_DEVICES += belkin_wemo
+
 define Device/7links_wlr-12xx
   IMAGE_SIZE := 7872k
   DEVICE_VENDOR := 7Links

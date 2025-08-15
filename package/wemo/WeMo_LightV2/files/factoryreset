@@ -1,0 +1,120 @@
+#!/bin/sh
+#        1: Connection established - LED White ON
+#        2: Ready to Connect - Slow Blink - RGB 1 Blue
+#        3: Identify Hardware (HomeKit) - Fast Blink - RGB 1 Green
+#        41: Connection Found - Solid 100% - #4A - RGB 1 White
+#        42: Connection Found - Solid 100% - #4B - RGB 1 Blue
+#        5: Turn on - Solid 100% - RGB 1 White
+#        6: Turn off - Dimmed - White LED 1
+#        7: Power Button Control - Fast Blink - RGB 1 Green
+#        8. Schedule Rule - solid 100% - RGB 1 Green
+#        9. Auto Off Timer Rule - solid 100% / slow blink to fast blink  - RGB 1 Green
+#        10. Long Press Rule - Fast Blink - RGB 1 Green
+#        11. Away Rule - solid 100% - RGB 1 Green
+#        12. Service Integration - Fast Blink - RGB 1 Green
+#        131. Error Detected - Solid 100%- RGB 1 Red
+#        132. Error Detected - Slow Blink- RGB 1 Red
+#        141. slow white blink
+#        142. slow blue blink
+#        143. slow red blink
+#        15. Firmware Update - low Blink - LED 1
+#        20 : solid white
+#        21: dim white
+#        22: solid red
+#        23: solid green
+#        24: sold blue
+# Behavior as following
+# first 2 second : nothing
+# 2-7 second: reboot while LED is solid white
+# 7-23 second: wifi reset while LED is solid blue
+# 12-17 second: full reset while LED is solid red
+logger "reset button pressed..."
+
+pwm=/sys/class/pwm/pwmchip0/pwm1/period
+pwm_saved=$(cat /sys/class/pwm/pwmchip0/pwm1/period)
+sleep 2
+
+# Let's steal the gpio control from gpio-button-hotplug
+rmmod gpio_button_hotplug
+# Check if gpio22 is still pressed
+echo 22 > /sys/class/gpio/export
+
+if [ $(cat /sys/class/gpio/gpio22/value) -eq 1 ];then
+    # button released, indicate second button press
+    echo 1 > /tmp/button2_toggle
+    # give back the gpio22 control back to gpio-button-hotplug
+    echo 22 > /sys/class/gpio/unexport
+    modprobe gpio-button-hotplug
+    # LED's back to default
+    echo $pwm_saved > $pwm
+    exit 0
+fi
+
+# now we passed 2 second, we will turn LED to white and continue checking
+echo 141 > $pwm
+sleep 4.6
+if [ $(cat /sys/class/gpio/gpio22/value) -eq 1 ];then
+    # button released, should reboot (button pressed during 2-7 second..
+    logger "Rebooting..."
+    /sbin/reboot
+    exit 0
+fi
+
+# button pressed for more than 6 second, need to reset wifi
+# need a way to control blue
+echo 142 > $pwm 
+sleep 4.6
+
+if [ $(cat /sys/class/gpio/gpio22/value) -eq 1 ];then
+    # button released, should do wifi reset
+    # give back the gpio22 control back to gpio-button-hotplug
+    echo 22 > /sys/class/gpio/unexport
+    modprobe gpio-button-hotplug
+    logger "WIFI Resetting..."
+    /sbin/nvram_set wemo_ipaddr=
+    /sbin/nvram_set restore_state=1
+    /sbin/nvram_set ClientSSID=
+    echo 24 > $pwm
+    sleep 4
+    ifconfig apcli0 down
+    ifconfig ra0 down
+    rmmod mt7628
+    sleep 1
+    modprobe mt7628
+    /sbin/ifconfig ra0 up
+    sleep 1
+    iwpriv ra0 set airplayEnable=1
+    killall wemoApp
+    killall wemohap
+    exit 0
+fi
+
+# button pressed for more than 10 second, we will perform factory reset
+echo 143 > $pwm
+sleep 4.6
+
+if [ $(cat /sys/class/gpio/gpio22/value) -eq 0 ];then
+    # button released, no action required.
+    # give back the gpio22 control back to gpio-button-hotplug
+    echo 22 > /sys/class/gpio/unexport
+    modprobe gpio-button-hotplug
+    # LED's back to default
+    echo $pwm_saved > $pwm
+    exit 0
+fi
+
+/sbin/nvram restore
+home_id_len=`/sbin/nvram_get home_id| wc -c`
+plugin_key_len=`/sbin/nvram_get plugin_key | wc -c`
+if [ $home_id_len -gt 1 -a $plugin_key_len -gt 1 ]
+then
+	/sbin/nvram_set restore_state=1
+else
+	/sbin/nvram_set restore_state=0
+fi
+/sbin/nvram commit
+/sbin/jffs2reset -y
+/sbin/mtd erase Belkin_settings
+echo 22 > $pwm
+sleep 5
+/sbin/reboot

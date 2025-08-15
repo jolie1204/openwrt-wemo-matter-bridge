@@ -1,0 +1,111 @@
+Index: libupnp-1.14.0/upnp/src/inc/ssdplib.h
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/inc/ssdplib.h
++++ libupnp-1.14.0/upnp/src/inc/ssdplib.h
+@@ -236,6 +236,13 @@ int ssdp_request_type(
+ 	SsdpEvent *Evt);
+ 
+ /*!
++ * \brief This function identifies if the device is Wemo
++ *
++ * \return 1 if wemo; 0 if not
++ */
++int isWemoDevice(char *str);
++
++/*!
+  * \brief This function reads the data from the ssdp socket.
+  */
+ void readFromSSDPSocket(
+Index: libupnp-1.14.0/upnp/src/ssdp/ssdp_ctrlpt.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/ssdp/ssdp_ctrlpt.c
++++ libupnp-1.14.0/upnp/src/ssdp/ssdp_ctrlpt.c
+@@ -187,6 +187,9 @@ void ssdp_handle_ctrlpt_msg(
+ 		hdr_value.buf[hdr_value.length] = '\0';
+ 		usn_found = (unique_service_name(hdr_value.buf, &event) == 0);
+ 		hdr_value.buf[hdr_value.length] = save_char;
++        if (!isWemoDevice(event.ServiceType)) {
++            return;
++        }
+ 	}
+ 	if (nt_found || usn_found) {
+ 		UpnpDiscovery_strcpy_DeviceID(param, event.UDN);
+Index: libupnp-1.14.0/upnp/src/ssdp/ssdp_server.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/ssdp/ssdp_server.c
++++ libupnp-1.14.0/upnp/src/ssdp/ssdp_server.c
+@@ -811,6 +811,26 @@ static void ssdp_event_handler_thread(
+ 	free_ssdp_event_handler_data(data);
+ }
+ 
++int isWemoDevice(char *str)
++{
++    char *ptr = NULL;
++    /* if it has "Belkin:service:" in the service string, its a wemo device. */
++    if(strstr(str, "Belkin:service:")) {
++        return 1;
++    }
++    /* if it has "LOCATION: http://IP:491XX/setup.xml" its a wemo device
++       (for old fw/Mobile App where ST doesn't have basicevent which usage rootdevice) */
++    ptr = strstr(str,":491");
++    if(ptr) {
++        int len = strlen(ptr);
++        if (len>15) {
++            if(strncmp(ptr+6,"/setup.xml",10)==0)
++                return 1;
++        }
++    }
++    return 0;
++}
++
+ void readFromSSDPSocket(SOCKET socket)
+ {
+ 	char *requestBuf = NULL;
+@@ -821,6 +841,7 @@ void readFromSSDPSocket(SOCKET socket)
+ 	socklen_t socklen = sizeof(__ss);
+ 	ssize_t byteReceived = 0;
+ 	char ntop_buf[INET6_ADDRSTRLEN];
++    char *if_ip = NULL;
+ 
+ 	memset(&job, 0, sizeof(job));
+ 
+@@ -865,6 +886,7 @@ void readFromSSDPSocket(SOCKET socket)
+ 				&((struct sockaddr_in *)&__ss)->sin_addr,
+ 				ntop_buf,
+ 				sizeof(ntop_buf));
++            if_ip=UpnpGetServerIpAddress();
+ 			break;
+ #ifdef UPNP_ENABLE_IPV6
+ 		case AF_INET6:
+@@ -872,6 +894,7 @@ void readFromSSDPSocket(SOCKET socket)
+ 				&((struct sockaddr_in6 *)&__ss)->sin6_addr,
+ 				ntop_buf,
+ 				sizeof(ntop_buf));
++            if_ip=UpnpGetServerIp6Address();
+ 			break;
+ #endif /* UPNP_ENABLE_IPV6 */
+ 		default:
+@@ -893,6 +916,23 @@ void readFromSSDPSocket(SOCKET socket)
+ 			/* null-terminate */
+ 			data->parser.msg.msg.buf[byteReceived] = 0;
+ 			memcpy(&data->dest_addr, &__ss, sizeof(__ss));
++            /* Allow only wemo device advertisement to reach wemoApp */
++            if (strstr(requestBuf, "ssdp:alive")) {
++                if (!isWemoDevice(requestBuf) || (!strcmp(ntop_buf,if_ip))) {
++                    free_ssdp_event_handler_data(data);
++                    return;
++                }
++            }
++			if(strstr(requestBuf, "ssdp:discover")) {
++                if((!(strstr(requestBuf, "urn:Belkin"))
++                    && !(strstr(requestBuf, "upnp:rootdevice")))
++                   || (!strcmp(ntop_buf,if_ip))) {
++                    /* printf("M-SEARCH from device with non wemo ST\n"); */
++                    free_ssdp_event_handler_data( data );
++                    return;
++                }
++            }
++            
+ 			TPJobInit(&job,
+ 				(start_routine)ssdp_event_handler_thread,
+ 				data);

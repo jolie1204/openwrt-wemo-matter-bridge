@@ -1,0 +1,65 @@
+Index: libupnp-1.14.0/upnp/src/api/upnpapi.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/api/upnpapi.c
++++ libupnp-1.14.0/upnp/src/api/upnpapi.c
+@@ -3756,12 +3756,11 @@ int UpnpGetIfInfo(const char *IfName)
+ 	}
+ 	/* cycle through available interfaces and their addresses. */
+ 	for (ifa = ifap; ifa != NULL; ifa = ifa->ifa_next) {
+-		/* Skip LOOPBACK interfaces, DOWN interfaces and interfaces that
+-		 */
+-		/* don't support MULTICAST. */
+-		if ((ifa->ifa_flags & IFF_LOOPBACK) ||
+-			(!(ifa->ifa_flags & IFF_UP)) ||
+-			(!(ifa->ifa_flags & IFF_MULTICAST))) {
++		/* Skip DOWN interfaces and interfaces that
++           don't support MULTICAST. */
++		if ((!(ifa->ifa_flags & IFF_LOOPBACK)) &&
++			((!(ifa->ifa_flags & IFF_UP)) ||
++             (!(ifa->ifa_flags & IFF_MULTICAST)))) {
+ 			continue;
+ 		}
+ 		if (ifname_found == 0) {
+@@ -3943,11 +3942,11 @@ int UpnpGetIfInfo(const char *IfName)
+ 				"Can't get interface flags for %s:\n",
+ 				ifReq.ifr_name);
+ 		}
+-		/* Skip LOOPBACK interfaces, DOWN interfaces and interfaces that
+-		 * don't support MULTICAST. */
+-		if ((ifReq.ifr_flags & IFF_LOOPBACK) ||
+-			(!(ifReq.ifr_flags & IFF_UP)) ||
+-			(!(ifReq.ifr_flags & IFF_MULTICAST))) {
++		/* Skip DOWN interfaces and interfaces that
++           don't support MULTICAST. */
++        if ((!(ifReq.ifr_flags & IFF_LOOPBACK)) &&
++			((!(ifReq.ifr_flags & IFF_UP)) ||
++             (!(ifReq.ifr_flags & IFF_MULTICAST)))) {
+ 			continue;
+ 		}
+ 		if (ifname_found == 0) {
+Index: libupnp-1.14.0/upnp/src/gena/gena_device.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/gena/gena_device.c
++++ libupnp-1.14.0/upnp/src/gena/gena_device.c
+@@ -1262,8 +1262,11 @@ int gena_validate_delivery_urls(
+ 		for (i = 0; i < url_list->size; i++) {
+ 			deliveryAddr4 = (struct sockaddr_in *)
+ 				&url_list->parsedURLs[i].hostport.IPaddress;
+-			if ((deliveryAddr4->sin_addr.s_addr & genaNetmask.s_addr)
+-				!= (genaAddr4.s_addr & genaNetmask.s_addr)) {
++            printf("##### deliveryAddr4->sin_addr.s_addr = 0x%x, INADDR_LOOPBACK = 0x%x, htonl(INADDR_LOOPBACK) = 0x%x\n",
++                   deliveryAddr4->sin_addr.s_addr, INADDR_LOOPBACK, htonl(INADDR_LOOPBACK));
++			if (((deliveryAddr4->sin_addr.s_addr & genaNetmask.s_addr)
++                 != (genaAddr4.s_addr & genaNetmask.s_addr)) &&
++                (deliveryAddr4->sin_addr.s_addr != htonl(INADDR_LOOPBACK))) {
+ 				inet_ntop(AF_INET, &deliveryAddr4->sin_addr,
+ 					deliveryAddrString, sizeof(deliveryAddrString));
+ 				UpnpPrintf(UPNP_CRITICAL,
+@@ -1276,6 +1279,7 @@ int gena_validate_delivery_urls(
+ 					gIF_IPV4,
+ 					gIF_IPV4_NETMASK
+ 					);
++                printf("DeliveryURL %s is invalid.\n");
+ 			      return -1;
+ 			}
+ 		}

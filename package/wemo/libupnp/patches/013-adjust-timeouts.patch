@@ -1,0 +1,24 @@
+Index: libupnp-1.14.0/upnp/src/inc/upnpapi.h
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/inc/upnpapi.h
++++ libupnp-1.14.0/upnp/src/inc/upnpapi.h
+@@ -51,7 +51,7 @@
+ 
+ #define DEFAULT_MX 5
+ 
+-#define DEFAULT_MAXAGE 1800
++#define DEFAULT_MAXAGE 86400
+ 
+ #define DEFAULT_SOAP_CONTENT_LENGTH 16000
+ #define MAX_SOAP_CONTENT_LENGTH (size_t)32000
+@@ -62,8 +62,8 @@ extern size_t g_maxContentLength;
+ extern int g_UpnpSdkEQMaxLen;
+ extern int g_UpnpSdkEQMaxAge;
+ 
+-/* 30-second timeout */
+-#define UPNP_TIMEOUT	30
++/* 10-second timeout */
++#define UPNP_TIMEOUT	10
+ 
+ typedef enum {HND_INVALID=-1,HND_CLIENT,HND_DEVICE} Upnp_Handle_Type;
+ 
