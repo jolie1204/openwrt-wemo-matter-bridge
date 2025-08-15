@@ -1,0 +1,153 @@
+#include "mt7628an.dtsi"
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	compatible = "belkin,wemo", "mediatek,mt7628an-soc";
+	model = "wemo";
+
+	keys: keys {
+        compatible = "gpio-keys";
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        btn0: button@0 {
+            label = "button";
+            /* choose the keycode you want OpenWrt to see */
+            linux,code = <KEY_RESTART>;
+            gpios = <&gpio 23 GPIO_ACTIVE_LOW>;
+            debounce-interval = <50>;
+        };
+    };
+
+	gpio-export {
+		compatible = "gpio-export";
+		#size-cells = <0>;
+
+		relay: relay {
+			gpio-export,name = "relay";
+			gpios = <&gpio 19 GPIO_ACTIVE_HIGH>;
+			gpio-export,output = <0>;
+		};
+	};
+
+	run_control: leds {
+		compatible = "gpio-leds";
+		amber: amber {
+			label = "amber";
+			gpios = <&gpio 17 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+			linux,default-trigger = "none";
+		};
+		white: white {
+			label = "white";
+			gpios = <&gpio 16 GPIO_ACTIVE_HIGH>;
+			default-state = "on";
+			linux,default-trigger = "timer";
+		};
+	};
+};
+
+&state_default {
+	gpio {
+		groups = "i2c";
+		function = "gpio";
+	};
+};
+
+&spi0 {
+	status = "okay";
+
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "Uboot";
+				reg = <0x0 0x50000>;
+			};
+			partition@50000 {
+				label = "kernel_1";
+				reg = <0x50000 0x1D0000>;
+			};
+			partition@220000 {
+				label = "rootfs_1";
+				reg = <0x220000 0x5a0000>;
+			};
+			partition@7c0000 {
+				label = "kernel_2";
+				reg = <0x7c0000 0x1D0000>;
+			};
+			partition@990000 {
+				label = "rootfs_2";
+				reg = <0x990000 0x570000>;
+			};
+			partition@f00000 {
+				label = "rootfs_data";
+				reg = <0xf00000 0x50000>;
+			};
+			partition@fe0000 {
+				label = "nvram";
+				reg = <0xfe0000 0x10000>;
+			};
+			partition@ff0000 {
+				label = "User_Factory";
+				reg = <0xff0000 0x10000>;
+			};
+			Factory: partition@40000 {
+				label = "Factory";
+				reg = <0x40000 0x10000>;
+				compatible = "nvmem-cells";
+				#address-cells = <1>;
+				#size-cells = <1>;
+				eeprom_factory_0: eeprom@0 {
+					reg = <0x0 0x400>;
+				};
+				eth_mac: macaddr@28 {
+					reg = <0x28 0x6>;
+				};
+			};
+			partition@7b0000 {
+				label = "homekit";
+				reg = <0x7b0000 0x10000>;
+			};
+			partition@f50000 {
+				label = "Belkin_settings";
+				reg = <0xf50000 0x90000>;
+			};
+			partition@30000 {
+				label = "Uboot_env";
+				reg = <0x30000 0x10000>;
+			};
+			partition@50000b {
+				label = "Firmware_1";
+				reg = <0x50000 0x760000>;
+			};
+			partition@7c0000b {
+				label = "Firmware_2";
+				reg = <0x7c0000 0x760000>;
+			};
+		};
+	};
+};
+
+&wmac {
+	status = "okay";
+	nvmem-cells = <&eeprom_factory_0>;
+	nvmem-cell-names = "eeprom";
+};
+
+&ethernet {
+    status = "okay";
+	nvmem-cells = <&eth_mac>;
+	nvmem-cell-names = "mac-address";
+    /* Optional if you need +1 / -1 variants:
+       mtd-mac-address-increment = <1>;
+    */
+};

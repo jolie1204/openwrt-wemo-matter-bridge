@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scpd xmlns="urn:Belkin:service-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <actionList>
+    <action>
+      <name>GetDeviceInformation</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>UTC</name>
+          <relatedStateVariable>UTC</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>TimeZone</name>
+          <relatedStateVariable>TimeZone</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>dst</name>
+          <relatedStateVariable>dst</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>DstSupported</name>
+          <relatedStateVariable>DstSupported</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>DeviceInformation</name>
+          <relatedStateVariable>DeviceInformation</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>Payload</name>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>HKSetupState</name>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>ProvisionedBy</name>
+          <direction>out</direction>
+        </argument>
+        <!--  Adding Countdown Time -->
+        <argument>
+          <retval />
+          <name>CountdownTime</name>
+          <relatedStateVariable>CountdownTime</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>TimeSync</name>
+          <relatedStateVariable>TimeSync</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetInformation</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>UTC</name>
+          <relatedStateVariable>UTC</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>TimeZone</name>
+          <relatedStateVariable>TimeZone</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>dst</name>
+          <relatedStateVariable>dst</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>DstSupported</name>
+          <relatedStateVariable>DstSupported</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>Information</name>
+          <relatedStateVariable>Information</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>TimeSync</name>
+          <relatedStateVariable>TimeSync</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+  </actionList>
+  <serviceStateTable>
+    <stateVariable sendEvents="yes">
+      <name>DeviceInformation</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <!--  Adding Countdown Time -->
+    <stateVariable sendEvents="yes">
+      <name>CountdownTime</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>Information</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>TimeSync</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+  </serviceStateTable>
+</scpd>

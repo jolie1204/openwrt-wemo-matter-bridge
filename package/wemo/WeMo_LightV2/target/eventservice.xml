@@ -1,0 +1,714 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scpd xmlns="urn:Belkin:service-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <actionList>
+    <action>
+      <name>SetBinaryState</name>
+      <argumentList>
+        <argument>
+          <name>BinaryState</name>
+          <relatedStateVariable>BinaryState</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <name>Duration</name>
+          <relatedStateVariable>Duration</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <name>EndAction</name>
+          <relatedStateVariable>EndAction</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <name>UDN</name>
+          <relatedStateVariable>UDN</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>CountdownEndTime</name>
+          <relatedStateVariable>CountdownEndTime</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>deviceCurrentTime</name>
+          <relatedStateVariable>deviceCurrentTime</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>SetLogLevelOption</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>Level</name>
+          <relatedStateVariable>Level</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <name>Option</name>
+          <relatedStateVariable>Option</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetFriendlyName</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>FriendlyName</name>
+          <relatedStateVariable>FriendlyName</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>ReSetup</name>
+      <argumentList>
+        <argument>
+          <name>Reset</name>
+          <relatedStateVariable>Reset</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>SetDeviceId</name>
+      <argumentList>
+        <argument>
+          <name>SetDeviceId</name>
+          <relatedStateVariable>DeviceId</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetDeviceId</name>
+    </action>
+    <action>
+      <name>GetMacAddr</name>
+    </action>
+    <action>
+      <name>GetSerialNo</name>
+    </action>
+    <action>
+      <name>GetPluginUDN</name>
+    </action>
+    <action>
+      <name>ShareHWInfo</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>Mac</name>
+          <relatedStateVariable>Mac</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>Serial</name>
+          <relatedStateVariable>Serial</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>Udn</name>
+          <relatedStateVariable>Udn</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>RestoreState</name>
+          <relatedStateVariable>RestoreState</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>HomeId</name>
+          <relatedStateVariable>HomeId</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>PluginKey</name>
+          <relatedStateVariable>PluginKey</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>ChangeFriendlyName</name>
+      <argumentList>
+        <argument>
+          <name>FriendlyName</name>
+          <relatedStateVariable>FriendlyName</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetRuleOverrideStatus</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>RuleOverrideStatus</name>
+          <relatedStateVariable>RuleOverrideStatus</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetDeviceIcon</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>DeviceIcon</name>
+          <relatedStateVariable>DeviceIcon</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetIconURL</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>URL</name>
+          <relatedStateVariable>URL</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetLogFileURL</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>LOGURL</name>
+          <relatedStateVariable>LOGURL</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>ChangeDeviceIcon</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>PictureSize</name>
+          <relatedStateVariable>PictureSize</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>PictureHeight</name>
+          <relatedStateVariable>PictureWidth</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>PictureColorDeep</name>
+          <relatedStateVariable>PictureColorDeep</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetBinaryState</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>BinaryState</name>
+          <relatedStateVariable>BinaryState</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>SetMultiState</name>
+      <argumentList>
+        <argument>
+          <name>state</name>
+          <relatedStateVariable>StateList</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <name>state</name>
+          <relatedStateVariable>StateList</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <name>state</name>
+          <relatedStateVariable>StateList</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetWatchdogFile</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>WDFile</name>
+          <relatedStateVariable>WDFile</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetSignalStrength</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>SignalStrength</name>
+          <relatedStateVariable>SignalStrength</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>SetServerEnvironment</name>
+      <argumentList>
+        <argument>
+          <name>ServerEnvironment</name>
+          <relatedStateVariable>ServerEnvironment</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <name>TurnServerEnvironment</name>
+          <relatedStateVariable>TurnServerEnvironment</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <name>ServerEnvironmentType</name>
+          <relatedStateVariable>ServerEnvironmentType</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetServerEnvironment</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>ServerEnvironment</name>
+          <relatedStateVariable>ServerEnvironment</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>TurnServerEnvironment</name>
+          <relatedStateVariable>TurnServerEnvironment</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>ServerEnvironmentType</name>
+          <relatedStateVariable>ServerEnvironmentType</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetIconVersion</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>IconVersion</name>
+          <relatedStateVariable>IconVersion</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>SetAwayRuleTask</name>
+      <argumentList>
+        <argument>
+          <name>EnableAwayTask</name>
+          <relatedStateVariable>EnableAwayTask</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <name>RuleID</name>
+          <relatedStateVariable>RuleID</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>actionStatus</name>
+          <relatedStateVariable>actionStatus</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetSimulatedRuleData</name>
+      <argumentList>
+        <argument>
+          <name>RuleData</name>
+          <relatedStateVariable>RuleData</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>NotifyManualToggle</name>
+      <argumentList>
+        <argument>
+          <name>ManualToggle</name>
+          <relatedStateVariable>ManualToggle</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>SimulateLongPress</name>
+      <argumentList>
+        <argument>
+          <name>LongPress</name>
+          <direction>out</direction>
+          <relatedStateVariable>LongPress</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>SimulateOverTemp</name>
+      <argumentList>
+        <argument>
+          <name>overTemp</name>
+          <direction>in</direction>
+          <relatedStateVariable>overTemp</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>overTempStatus</name>
+          <direction>out</direction>
+          <relatedStateVariable>overTempStatus</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>ConfigureHushMode</name>
+      <argumentList>
+        <argument>
+          <name>hushMode</name>
+          <direction>in</direction>
+          <relatedStateVariable>hushMode</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>hushStatus</name>
+          <direction>out</direction>
+          <relatedStateVariable>hushStatus</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>identifyDevice</name>
+    </action>
+    <action>
+      <name>setDummyMode</name>
+    </action>
+    <action>
+      <name>GetHKSetupInfo</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>HKSetupKey</name>
+          <direction>out</direction>
+        </argument>
+        <argument>
+          <retval />
+          <name>HKSetupCode</name>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>SetSetupDoneStatus</name>
+    </action>
+    <action>
+      <name>GetSetupDoneStatus</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>SetupDone</name>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>setHKSetupState</name>
+      <argumentList>
+        <argument>
+          <name>HKSetupDone</name>
+          <relatedStateVariable>HKSetupDone</relatedStateVariable>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>getHKSetupState</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>HKSetupDone</name>
+          <relatedStateVariable>HKSetupDone</relatedStateVariable>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>setAutoFWUpdate</name>
+      <argumentList>
+        <argument>
+          <name>enableAutoUpdate</name>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>SetEnforceSecurity</name>
+      <argumentList>
+        <argument>
+          <name>SecurityEnabled</name>
+          <direction>in</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetEnforceSecurity</name>
+      <argumentList>
+        <argument>
+          <retval />
+          <name>SecurityEnabled</name>
+          <direction>out</direction>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>removeHomekitData</name>
+    </action>
+  </actionList>
+  <serviceStateTable>
+    <stateVariable sendEvents="yes">
+      <name>BinaryState</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>mode</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>time</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>startTime</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>level</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>option</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>Reset</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>FriendlyName</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>HomeId</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>DeviceId</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>SmartDevInfo</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>MacAddr</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>SerialNo</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>PluginUDN</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>DeviceIcon</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="No">
+      <name>StateList</name>
+      <dataType>list</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>URL</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>RuleOverrideStatus</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>WDFile</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>SignalStrength</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>ServerEnvironment</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>TurnServerEnvironment</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>ServerEnvironmentType</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>IconVersion</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>RuleData</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>ManualToggle</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>Duration</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>EndAction</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>UDN</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>RuleData</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>ManualToggle</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>CountdownEndTime</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>deviceCurrentTime</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>EnableUpload</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>LongPress</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>actionStatus</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>EnableAwayTask</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>RuleID</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>overTemp</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>overTempStatus</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>hushMode</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>hushStatus</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>HKSetupDone</name>
+      <dataType>string</dataType>
+      <defaultValue>0</defaultValue>
+    </stateVariable>
+  </serviceStateTable>
+</scpd>

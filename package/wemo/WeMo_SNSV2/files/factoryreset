@@ -1,0 +1,54 @@
+#!/bin/sh
+amber=/sys/class/leds/amber/trigger
+white=/sys/class/leds/white/trigger
+
+white_delay_on=/sys/class/leds/white/delay_on
+white_delay_off=/sys/class/leds/white/delay_off
+amber_delay_on=/sys/class/leds/amber/delay_on
+amber_delay_off=/sys/class/leds/amber/delay_off
+
+logger "Factory Resetting will happen if the button is not release in 3 sec..."
+
+echo none > $white
+echo default-on > $amber
+sleep 3
+
+# Let's steal the gpio control from gpio-button-hotplug
+rmmod gpio_button_hotplug
+# Check if gpio23 is still pressed
+echo 23 > /sys/class/gpio/export
+if [ $(cat /sys/class/gpio/gpio23/value) -eq 1 ];then
+    # button released, no action required.
+    # give back the gpio23 control back to gpio-button-hotplug
+    echo 23 > /sys/class/gpio/unexport
+    modprobe gpio-button-hotplug
+    # LED's back to default
+    echo none > $amber
+    echo timer > $white
+    exit 0
+fi
+
+# now we passed the timer, we will factory reset...
+echo none > $amber
+echo none > $white
+echo timer > $white
+echo 360 > $white_delay_off
+echo 140 > $white_delay_on
+sleep 3
+echo default-on > $white
+sleep 1.5
+echo timer > $white
+
+/sbin/nvram restore
+home_id_len=`/sbin/nvram_get home_id| wc -c`
+plugin_key_len=`/sbin/nvram_get plugin_key | wc -c`
+if [ $home_id_len -gt 1 -a $plugin_key_len -gt 1 ]
+then
+	/sbin/nvram_set restore_state=1
+else
+	/sbin/nvram_set restore_state=0
+fi
+/sbin/nvram commit
+/sbin/jffs2reset -y
+/sbin/mtd erase Belkin_settings
+/sbin/reboot

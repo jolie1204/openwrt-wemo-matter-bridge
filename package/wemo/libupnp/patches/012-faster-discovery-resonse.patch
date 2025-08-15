@@ -1,0 +1,266 @@
+Index: libupnp-1.14.0/upnp/inc/upnp.h
+===================================================================
+--- libupnp-1.14.0.orig/upnp/inc/upnp.h
++++ libupnp-1.14.0/upnp/inc/upnp.h
+@@ -549,7 +549,10 @@ EXPORT_SPEC int UpnpInit2(
+ 	const char *IfName,
+ 	/*!  Local Port to listen for incoming connections.
+ 	 * \c NULL will pick an arbitrary free port. */
+-	unsigned short DestPort);
++	unsigned short DestPort,
++    /*! Device UDN string to be passed.
++     * NULL will ignore UDN */
++    char *udn);
+ 
+ /*!
+  * \brief Initializes the OpenSSL library, and the OpenSSL context for use
+Index: libupnp-1.14.0/upnp/src/api/upnpapi.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/api/upnpapi.c
++++ libupnp-1.14.0/upnp/src/api/upnpapi.c
+@@ -219,6 +219,9 @@ Upnp_SID gUpnpSdkNLSuuid;
+ SSL_CTX *gSslCtx = NULL;
+ #endif
+ 
++/* Device UDN */
++char gDevUDN[256] = {0};
++
+ /*!
+  * \brief (Windows Only) Initializes the Windows Winsock library.
+  *
+@@ -476,7 +479,7 @@ static int UpnpInitStartServers(
+ 	return UPNP_E_SUCCESS;
+ }
+ 
+-int UpnpInit2(const char *IfName, unsigned short DestPort)
++int UpnpInit2(const char *IfName, unsigned short DestPort, char *udn)
+ {
+ 	int retVal;
+ 
+@@ -497,6 +500,11 @@ int UpnpInit2(const char *IfName, unsign
+ 		goto exit_function;
+ 	}
+ 
++    if (udn && strlen(udn)) {
++        strncpy(gDevUDN, udn, sizeof(gDevUDN) - 1);
++        printf("***** Device UDN passed: %s *****\n", gDevUDN);
++    }
++
+ 	UpnpPrintf(UPNP_INFO,
+ 		API,
+ 		__FILE__,
+Index: libupnp-1.14.0/upnp/src/inc/ssdplib.h
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/inc/ssdplib.h
++++ libupnp-1.14.0/upnp/src/inc/ssdplib.h
+@@ -370,6 +370,11 @@ int DeviceAdvertisement(
+ 	/* [in] RegistrationState as defined by UPnP Low Power. */
+ 	int RegistrationState);
+ 
++int SendDiscoveryResponse(struct sockaddr_in *DestAddr,
++                          char *Udn,
++                          char *Location,
++                          int Duration);
++
+ /*!
+  * \brief Creates the reply packet based on the input parameter, and send it
+  * to the client addesss given in its input parameter DestAddr.
+Index: libupnp-1.14.0/upnp/src/ssdp/ssdp_device.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/ssdp/ssdp_device.c
++++ libupnp-1.14.0/upnp/src/ssdp/ssdp_device.c
+@@ -69,12 +69,21 @@
+ void advertiseAndReplyThread(void *data)
+ {
+ 	SsdpSearchReply *arg = (SsdpSearchReply *) data;
++	time_t rawtime;
++	char* otTime;
+ 
+ 	AdvertiseAndReply(0, arg->handle,
+ 			  arg->event.RequestType,
+ 			  (struct sockaddr *)&arg->dest_addr,
+ 			  arg->event.DeviceType,
+ 			  arg->event.UDN, arg->event.ServiceType, arg->MaxAge);
++
++	time (&rawtime);
++	otTime = ctime(&rawtime);
++	otTime[strlen(otTime) - 1] = 0x00;
++    printf("[%s]: Sent discovery response to device:%s\n",
++           otTime,
++           inet_ntoa(((struct sockaddr_in *)&(arg->dest_addr))->sin_addr));
+ 	free(arg);
+ }
+ 
+@@ -91,8 +100,13 @@ void ssdp_handle_device_request(http_mes
+ 	int ret_code;
+ 	SsdpSearchReply *threadArg = NULL;
+ 	ThreadPoolJob job;
++#if 0
+ 	int replyTime;
++#endif
+ 	int maxAge;
++	time_t rawtime;
++	char* otTime;
++	int return_code = 0;
+ 
+ 	memset(&job, 0, sizeof(job));
+ 
+@@ -101,7 +115,12 @@ void ssdp_handle_device_request(http_mes
+ 	    memptr_cmp(&hdr_value, "\"ssdp:discover\"") != 0)
+ 		/* bad or missing hdr. */
+ 		return;
+-	/* MX header. */
++
++	time (&rawtime);
++	otTime = ctime(&rawtime);
++	otTime[strlen(otTime) - 1] = 0x00;
++
++    /* MX header. */
+ 	if (httpmsg_find_hdr(hmsg, HDR_MX, &hdr_value) == NULL ||
+ 	    (mx = raw_to_int(&hdr_value, 10)) < 0)
+ 		return;
+@@ -146,14 +165,27 @@ void ssdp_handle_device_request(http_mes
+ 		threadArg = (SsdpSearchReply *)malloc(sizeof(SsdpSearchReply));
+ 		if (threadArg == NULL)
+ 			return;
+-		threadArg->handle = handle;
++
++        printf("[%s]: Receiving discovery request: MX: %d from: %s\n",
++               otTime,
++               mx,
++               inet_ntoa(((struct sockaddr_in *)dest_addr)->sin_addr));
++
++        threadArg->handle = handle;
+ 		memcpy(&threadArg->dest_addr, dest_addr, sizeof(threadArg->dest_addr));
+ 		threadArg->event = event;
+ 		threadArg->MaxAge = maxAge;
+ 
+ 		TPJobInit(&job, advertiseAndReplyThread, threadArg);
+ 		TPJobSetFreeFunction(&job, (free_routine) free);
++        TPJobSetPriority( &job, HIGH_PRIORITY );
+ 
++        return_code = ThreadPoolAdd(&gSendThreadPool, &job, NULL);
++        if(return_code != 0) {
++            printf("##### Adding Discovery response job failed: %d #####\n",
++                   return_code);
++        }
++#if 0
+ 		/* Subtract a percentage from the mx to allow for network and processing
+ 		 * delays (i.e. if search is for 30 seconds, respond
+ 		 * within 0 - 27 seconds). */
+@@ -164,6 +196,7 @@ void ssdp_handle_device_request(http_mes
+ 		replyTime = rand() % mx;
+ 		TimerThreadSchedule(&gTimerThread, replyTime, REL_SEC, &job,
+ 							SHORT_TERM, NULL);
++#endif
+ 		start = handle;
+ 	}
+ }
+@@ -581,6 +614,76 @@ error_handler:
+ 
+ 	return ret_code;
+ }
++
++static int SendDiscoveryPackets(struct sockaddr_in *DestAddr,
++                                char **RqPacket )
++{
++	char errorBuffer[ERROR_BUFFER_LEN];
++	int ReplySock;
++	int socklen = sizeof( struct sockaddr_in );
++	int NumCopy=0;
++	int rc;
++	unsigned long replyAddr = inet_addr(gIF_IPV4);
++    /* a/c to UPNP Spec */
++	int ttl = 4;
++
++	ReplySock = socket( AF_INET, SOCK_DGRAM, 0 );
++	if ( ReplySock == -1 ) {
++		strerror_r(errno, errorBuffer, ERROR_BUFFER_LEN);
++		UpnpPrintf( UPNP_INFO, SSDP, __FILE__, __LINE__,
++				"SSDP_LIB: New Request Handler:"
++				"Error in socket(): %s\n", errorBuffer );
++
++		return UPNP_E_OUTOF_SOCKET;
++	}
++
++	setsockopt( ReplySock, IPPROTO_IP, IP_MULTICAST_IF,
++			(char *)&replyAddr, sizeof (replyAddr) );
++	setsockopt( ReplySock, IPPROTO_IP, IP_MULTICAST_TTL,
++			(char *)&ttl, sizeof (int) );
++
++	while( NumCopy < 1) {
++		rc = sendto( ReplySock, *( RqPacket),
++				strlen( *(RqPacket ) ),
++				0, ( struct sockaddr * )DestAddr, socklen );
++		imillisleep( SSDP_PAUSE );
++		++NumCopy;
++	}
++
++	UpnpCloseSocket( ReplySock );
++
++	return UPNP_E_SUCCESS;
++}
++
++int SendDiscoveryResponse(struct sockaddr_in *DestAddr,
++                          char *Udn,
++                          char *Location,
++                          int Duration)
++{
++	int ret_code;
++	char *msgs[1];
++	char Mil_Usn[LINE_SIZE];
++
++    msgs[0] = NULL;
++
++	sprintf( Mil_Usn, "%s::upnp:rootdevice", Udn );
++	CreateServicePacket( MSGTYPE_REPLY, "upnp:rootdevice",
++			Mil_Usn, Location, Duration, &msgs[0],
++			AF_INET, -1, -1, -1);
++
++	/* check error */
++	if( msgs[0] == NULL ) {
++		free( msgs[0] );
++		return UPNP_E_OUTOF_MEMORY;
++	}
++
++	/* send msgs */
++	ret_code = SendDiscoveryPackets( DestAddr, msgs );
++	if( msgs[0] != NULL )
++		free( msgs[0] );
++
++	return ret_code;
++}
+ 
+ int SendReply(struct sockaddr *DestAddr, char *DevType, int RootDev,
+ 	      char *Udn, char *Location, int Duration, int ByType,
+Index: libupnp-1.14.0/upnp/src/ssdp/ssdp_server.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/ssdp/ssdp_server.c
++++ libupnp-1.14.0/upnp/src/ssdp/ssdp_server.c
+@@ -90,6 +90,8 @@ struct SSDPSockArray
+ #endif /* INCLUDE_CLIENT_APIS */
+ };
+ 
++extern char gDevUDN[];
++
+ #ifdef INCLUDE_DEVICE_APIS
+ static const char SERVICELIST_STR[] = "serviceList";
+ 
+@@ -137,7 +139,16 @@ int AdvertiseAndReply(int AdFlag,
+ 		goto end_function;
+ 	}
+ 	defaultExp = SInfo->MaxAge;
+-	/* parse the device list and send advertisements/replies */
++
++    if(AdFlag == 0 && SearchType == SSDP_ROOTDEVICE && strlen(gDevUDN)) {
++        SendDiscoveryResponse((struct sockaddr_in *)DestAddr, gDevUDN, SInfo->DescURL, defaultExp);
++
++        HandleUnlock();
++
++        return UPNP_E_SUCCESS;
++    }
++
++    /* parse the device list and send advertisements/replies */
+ 	while (NumCopy == 0 || (AdFlag && NumCopy < NUM_SSDP_COPY)) {
+ 		if (NumCopy != 0)
+ 			imillisleep(SSDP_PAUSE);

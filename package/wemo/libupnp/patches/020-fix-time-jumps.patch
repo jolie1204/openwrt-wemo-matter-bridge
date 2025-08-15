@@ -1,0 +1,364 @@
+Index: libupnp-1.14.0/upnp/inc/ithread.h
+===================================================================
+--- libupnp-1.14.0.orig/upnp/inc/ithread.h
++++ libupnp-1.14.0/upnp/inc/ithread.h
+@@ -918,6 +918,10 @@ EXPORT_SPEC int pthread_mutexattr_setkin
+ 	pthread_mutexattr_t *attr, int kind);
+ #endif
+ 
++#define BILLION   1000000000
++int ThreadCondTimedwait(pthread_cond_t *Condition,pthread_mutex_t *Mutex,
++                        __const struct timespec *TimeOut);
++
+ #ifdef __cplusplus
+ }
+ #endif
+Index: libupnp-1.14.0/upnp/src/gena/gena_device.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/gena/gena_device.c
++++ libupnp-1.14.0/upnp/src/gena/gena_device.c
+@@ -1344,6 +1344,7 @@ void gena_process_subscription_request(S
+ 	memptr callback_hdr;
+ 	memptr timeout_hdr;
+ 	int rc = 0;
++    struct timespec now;
+ 
+ 	UpnpPrintf(UPNP_INFO,
+ 		GENA,
+@@ -1491,7 +1492,8 @@ void gena_process_subscription_request(S
+ 		}
+ 	}
+ 	if (time_out >= 0) {
+-		sub->expireTime = time(NULL) + time_out;
++      clock_gettime(CLOCK_MONOTONIC,&now);
++      sub->expireTime = now.tv_sec + time_out;
+ 	} else {
+ 		/* infinite time */
+ 		sub->expireTime = 0;
+@@ -1547,6 +1549,7 @@ void gena_process_subscription_renewal_r
+ 	memptr temp_hdr;
+ 	membuffer event_url_path;
+ 	memptr timeout_hdr;
++    struct timespec now;
+ 
+ 	/* if a CALLBACK or NT header is present, then it is an error */
+ 	if (httpmsg_find_hdr(request, HDR_CALLBACK, NULL) != NULL ||
+@@ -1641,7 +1644,8 @@ void gena_process_subscription_renewal_r
+ 	if (time_out == -1) {
+ 		sub->expireTime = 0;
+ 	} else {
+-		sub->expireTime = time(NULL) + time_out;
++        clock_gettime(CLOCK_MONOTONIC,&now);
++		sub->expireTime = now.tv_sec + time_out;
+ 	}
+ 
+ 	if (respond_ok(info, time_out, sub, request) != UPNP_E_SUCCESS) {
+Index: libupnp-1.14.0/upnp/src/genlib/net/sock.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/genlib/net/sock.c
++++ libupnp-1.14.0/upnp/src/genlib/net/sock.c
+@@ -168,11 +168,15 @@ static int sock_read_write(
+ 	fd_set writeSet;
+ 	struct timeval timeout;
+ 	long numBytes;
+-	time_t start_time = time(NULL);
++	time_t start_time;
+ 	SOCKET sockfd = info->socket;
+ 	long bytes_sent = 0;
+ 	size_t byte_left = (size_t)0;
+ 	ssize_t num_written;
++    struct timespec now;
++
++    clock_gettime(CLOCK_MONOTONIC,&now);
++    start_time = now.tv_sec;
+ 
+ 	FD_ZERO(&readSet);
+ 	FD_ZERO(&writeSet);
+@@ -257,8 +261,10 @@ static int sock_read_write(
+ 	if (numBytes < 0)
+ 		return UPNP_E_SOCKET_ERROR;
+ 	/* subtract time used for reading/writing. */
+-	if (*timeoutSecs != 0)
+-		*timeoutSecs -= (int)(time(NULL) - start_time);
++	if (*timeoutSecs != 0) {
++        clock_gettime(CLOCK_MONOTONIC,&now);
++		*timeoutSecs -= (int)(now.tv_sec - start_time);
++    }
+ 
+ 	return (int)numBytes;
+ }
+Index: libupnp-1.14.0/upnp/src/genlib/service_table/service_table.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/genlib/service_table/service_table.c
++++ libupnp-1.14.0/upnp/src/genlib/service_table/service_table.c
+@@ -120,6 +120,7 @@ subscription *GetSubscriptionSID(const U
+ 	subscription *previous = NULL;
+ 	subscription *found = NULL;
+ 	time_t current_time;
++    struct timespec now;
+ 
+ 	while (next && !found) {
+ 		if (!strcmp(next->sid, sid))
+@@ -131,7 +132,8 @@ subscription *GetSubscriptionSID(const U
+ 	}
+ 	if (found) {
+ 		/* get the current_time */
+-		time(&current_time);
++        clock_gettime(CLOCK_MONOTONIC,&now);
++        current_time = now.tv_sec;
+ 		if (found->expireTime && found->expireTime < current_time) {
+ 			if (previous) {
+ 				previous->next = found->next;
+@@ -153,9 +155,11 @@ subscription *GetNextSubscription(servic
+ 	subscription *next = NULL;
+ 	subscription *previous = NULL;
+ 	int notDone = 1;
++    struct timespec now;
+ 
+ 	/* get the current_time */
+-	time(&current_time);
++    clock_gettime(CLOCK_MONOTONIC,&now);
++    current_time = now.tv_sec;
+ 	while (notDone && current) {
+ 		previous = current;
+ 		current = current->next;
+Index: libupnp-1.14.0/upnp/src/threadutil/ThreadPool.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/threadutil/ThreadPool.c
++++ libupnp-1.14.0/upnp/src/threadutil/ThreadPool.c
+@@ -56,9 +56,9 @@
+  */
+ static long DiffMillis(
+ 	/*! . */
+-	struct timeval *time1,
++	struct timespec *time1,
+ 	/*! . */
+-	struct timeval *time2)
++	struct timespec *time2)
+ {
+ 	double temp = 0.0;
+ 
+@@ -68,7 +68,7 @@ static long DiffMillis(
+ 
+ 	/* convert microseconds to milliseconds and add to temp */
+ 	/* implicit flooring of unsigned long data type */
+-	temp += ((double)time1->tv_usec - (double)time2->tv_usec) / 1000.0;
++	temp += ((double)time1->tv_nsec - (double)time2->tv_nsec) / 1000000.0;
+ 
+ 	return (long)temp;
+ }
+@@ -164,13 +164,13 @@ static void CalcWaitTime(
+ 	/*! . */
+ 	ThreadPoolJob *job)
+ {
+-	struct timeval now;
++	struct timespec now;
+ 	long diff;
+ 
+ 	assert(tp != NULL);
+ 	assert(job != NULL);
+ 
+-	gettimeofday(&now, NULL);
++    clock_gettime(CLOCK_MONOTONIC,&now);
+ 	diff = DiffMillis(&now, &job->requestTime);
+ 	switch (p) {
+ 	case LOW_PRIORITY:
+@@ -196,9 +196,9 @@ static time_t StatsTime(
+ 	/*! . */
+ 	time_t *t)
+ {
+-	struct timeval tv;
++	struct timespec tv;
+ 
+-	gettimeofday(&tv, NULL);
++    clock_gettime(CLOCK_MONOTONIC,&tv);
+ 	if (t)
+ 		*t = tv.tv_sec;
+ 
+@@ -349,11 +349,11 @@ static void BumpPriority(
+ 	ThreadPool *tp)
+ {
+ 	int done = 0;
+-	struct timeval now;
++	struct timespec now;
+ 	long diffTime = 0;
+ 	ThreadPoolJob *tempJob = NULL;
+ 
+-	gettimeofday(&now, NULL);	
++    clock_gettime(CLOCK_MONOTONIC,&now);
+ 	while (!done) {
+ 		if (tp->medJobQ.size) {
+ 			tempJob = (ThreadPoolJob *)tp->medJobQ.head.next->item;
+@@ -395,13 +395,11 @@ static void SetRelTimeout(
+ 	/*! milliseconds in the future. */
+ 	int relMillis)
+ {
+-	struct timeval now;
+ 	int sec = relMillis / 1000;
+ 	int milliSeconds = relMillis % 1000;
+ 
+-	gettimeofday(&now, NULL);
+-	time->tv_sec = now.tv_sec + sec;
+-	time->tv_nsec = (now.tv_usec / 1000 + milliSeconds) * 1000000;
++	time->tv_sec = sec;
++	time->tv_nsec = milliSeconds * 1000000;
+ }
+ 
+ /*!
+@@ -505,7 +503,7 @@ static void *WorkerThread(
+ 			SetRelTimeout(&timeout, tp->attr.maxIdleTime);
+ 
+ 			/* wait for a job up to the specified max time */
+-			retCode = ithread_cond_timedwait(
++			retCode = ThreadCondTimedwait(
+ 				&tp->condition, &tp->mutex, &timeout);
+ 		}
+ 		tp->stats.idleThreads--;
+@@ -608,7 +606,7 @@ static ThreadPoolJob *CreateThreadPoolJo
+ 	if (newJob) {
+ 		*newJob = *job;
+ 		newJob->jobId = id;
+-		gettimeofday(&newJob->requestTime, NULL);
++        clock_gettime(CLOCK_MONOTONIC,&newJob->requestTime);
+ 	}
+ 
+ 	return newJob;
+Index: libupnp-1.14.0/upnp/src/threadutil/ThreadPool.h
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/threadutil/ThreadPool.h
++++ libupnp-1.14.0/upnp/src/threadutil/ThreadPool.h
+@@ -168,7 +168,7 @@ typedef struct THREADPOOLJOB
+ 	start_routine func;
+ 	void *arg;
+ 	free_routine free_func;
+-	struct timeval requestTime;
++	struct timespec requestTime;
+ 	ThreadPriority priority;
+ 	int jobId;
+ } ThreadPoolJob;
+Index: libupnp-1.14.0/upnp/src/threadutil/TimerThread.c
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/threadutil/TimerThread.c
++++ libupnp-1.14.0/upnp/src/threadutil/TimerThread.c
+@@ -68,6 +68,7 @@ static void TimerThreadWorker(
+     time_t nextEventTime = 0;
+     struct timespec timeToWait;
+     int tempId;
++    struct timespec now;
+ 
+     assert( timer != NULL );
+ 
+@@ -92,7 +93,8 @@ static void TimerThreadWorker(
+ 	    nextEvent = ( TimerEvent * ) head->item;
+ 	    nextEventTime = nextEvent->eventTime;
+ 	}
+-	currentTime = time(NULL);
++    clock_gettime(CLOCK_MONOTONIC,&now);
++    currentTime = now.tv_sec;
+ 	/* If time has elapsed, schedule job. */
+ 	if (nextEvent && currentTime >= nextEventTime) {
+ 	    if( nextEvent->persistent ) {
+@@ -113,9 +115,10 @@ static void TimerThreadWorker(
+ 	    continue;
+ 	}
+ 	if (nextEvent) {
++        clock_gettime(CLOCK_MONOTONIC,&now);
+ 	    timeToWait.tv_nsec = 0;
+-	    timeToWait.tv_sec = (long)nextEvent->eventTime;
+-	    ithread_cond_timedwait( &timer->condition, &timer->mutex,
++        timeToWait.tv_sec = nextEvent->eventTime - now.tv_sec;
++        ThreadCondTimedwait(&timer->condition, &timer->mutex,
+ 				    &timeToWait );
+ 	} else {
+ 	    ithread_cond_wait( &timer->condition, &timer->mutex );
+@@ -136,17 +139,17 @@ static int CalculateEventTime(
+ 	/*! [in] Timeout type. */
+ 	TimeoutType type)
+ {
+-    time_t now;
++    struct timespec now;
+ 
+     assert( timeout != NULL );
+ 
+     switch (type) {
+     case ABS_SEC:
+-	return 0;
++        return 0;
+     default: /* REL_SEC) */
+-	time(&now);
+-	( *timeout ) += now;
+-	return 0;
++        clock_gettime(CLOCK_MONOTONIC,&now);
++        ( *timeout ) += now.tv_sec;
++        return 0;
+     }
+ 
+     return -1;
+@@ -399,3 +402,67 @@ int TimerThreadShutdown(TimerThread *tim
+     return 0;
+ }
+ 
++extern int pthread_cond_timedwait (pthread_cond_t *__restrict __cond,
++				   pthread_mutex_t *__restrict __mutex,
++				   __const struct timespec *__restrict
++				   __abstime) __nonnull ((1, 2, 3));
++
++
++/* Wrapper for pthread_cond_timedwait()
++ * pthread_cond_timedwait() takes a timeout parameter in absolute time,
++ * If the system time jumps because it was set by NTP or the App 
++ * then ithread_cond_timedwait may timeout prematurely, this wrapper
++ * function restarts teh pthread_cond_timedwait() with a modified
++ * timeout if this occurs.
++ *
++ * NB: Unlike pthread_cond_timedwait() the TimeOut argument the amount of
++ * time to wait, not the ending time. */
++int ThreadCondTimedwait(pthread_cond_t *Condition,
++                        pthread_mutex_t *Mutex,
++                        __const struct timespec *TimeOut)
++{
++    int Ret;
++    struct timespec EndTime;
++    struct timespec now;
++    struct timeval tv;
++    struct timespec timeToWait;
++
++    /* Calculate timeout time in uptime */
++
++    clock_gettime(CLOCK_MONOTONIC,&now);
++    EndTime.tv_sec = now.tv_sec + TimeOut->tv_sec;
++    EndTime.tv_nsec = now.tv_nsec + TimeOut->tv_nsec;
++    if(EndTime.tv_nsec > BILLION) {
++        /* Roll nanoseconds into seconds */
++        EndTime.tv_sec++;
++        EndTime.tv_nsec %= BILLION;
++    }
++
++    for( ; ; ) {
++        /* Calculate absolute end of wait based on current system time. */
++        gettimeofday(&tv,NULL);
++
++        timeToWait.tv_sec = tv.tv_sec + (EndTime.tv_sec - now.tv_sec);
++        timeToWait.tv_nsec = (tv.tv_usec * 1000) + (EndTime.tv_nsec - now.tv_nsec);
++        if(timeToWait.tv_nsec > BILLION) {
++            /* Roll nanoseconds into seconds */
++            timeToWait.tv_sec++;
++            timeToWait.tv_nsec %= BILLION;
++        }
++        Ret = ithread_cond_timedwait(Condition,Mutex,&timeToWait);
++        if(Ret != ETIMEDOUT) {
++            break;
++        }
++        /* check if we really timed out or not based on uptime */
++        clock_gettime(CLOCK_MONOTONIC,&now);
++        if(now.tv_sec > EndTime.tv_sec) {
++            break;
++        }
++        if(now.tv_sec == EndTime.tv_sec && now.tv_nsec > EndTime.tv_nsec) {
++            break;
++        }
++        /* Nope, premature timeout ! wait longer. */
++    }
++
++    return Ret;
++}

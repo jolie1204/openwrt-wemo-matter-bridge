@@ -1,0 +1,53 @@
+#!/bin/sh
+# IMPORTANT : trigger switch will kill this pid if
+
+echo $$ > /tmp/longpress.pid
+
+cleanup() {
+    # restore gpio-button-hotplug
+    echo 23 > /sys/class/gpio/unexport
+    modprobe gpio-button-hotplug
+
+    rm -f /tmp/longpress.pid
+
+    exit
+}
+
+#install trap only if we are going to change leds
+trap cleanup SIGHUP SIGINT SIGTERM
+
+NWAY=`nvram get nWay`
+pwm=/sys/class/pwm/pwmchip0/pwm1/period
+pwm_saved=$(cat /sys/class/pwm/pwmchip0/pwm1/period)
+
+sleep 2 &
+wait
+
+# Let's steal the gpio control from gpio-button-hotplug
+rmmod gpio_button_hotplug
+# Check if gpio23 is still pressed
+echo 23 > /sys/class/gpio/export
+if [ $(cat /sys/class/gpio/gpio23/value) -eq 1 ];then
+    # button released, no action required.
+    # give back the gpio22 control back to gpio-button-hotplug
+    echo 23 > /sys/class/gpio/unexport
+    modprobe gpio-button-hotplug
+    echo $pwm_saved > $pwm
+    rm -f /tmp/longpress.pid
+    exit 0
+fi
+
+echo 10 > $pwm
+sleep 4.22
+logger "Long press seen..."
+echo 1 > /tmp/longpress_seen
+
+if [ "$NWAY" == "3" ] ; then
+    status=$(cat /tmp/notify_change)
+else
+    status=$(cat /sys/class/gpio/gpio19/value)
+fi
+
+echo $pwm_saved > $pwm
+    
+cleanup

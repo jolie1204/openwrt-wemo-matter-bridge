@@ -1,0 +1,49 @@
+Index: libupnp-1.14.0/upnp/src/inc/config.h
+===================================================================
+--- libupnp-1.14.0.orig/upnp/src/inc/config.h
++++ libupnp-1.14.0/upnp/src/inc/config.h
+@@ -74,7 +74,7 @@
+  *
+  * @{
+  */
+-#define JOBS_PER_THREAD 10
++#define JOBS_PER_THREAD 40
+ /* @} */
+ 
+ 
+@@ -90,7 +90,7 @@
+  *
+  * @{
+  */
+-#define MIN_THREADS 2 
++#define MIN_THREADS 5
+ /* @} */
+ 
+ 
+@@ -108,7 +108,7 @@
+  *
+  * @{
+  */
+-#define MAX_THREADS 12 
++#define MAX_THREADS 15
+ /* @} */
+ 
+ 
+@@ -139,7 +139,7 @@
+  *
+  * @{
+  */
+-#define MAX_JOBS_TOTAL 100
++#define MAX_JOBS_TOTAL 512
+ /* @} */
+ 
+ /*! \name MAX_SUBSCRIPTION_QUEUED_EVENTS
+@@ -195,7 +195,7 @@
+  *
+  * @{
+  */
+-#define NUM_SSDP_COPY  2
++#define NUM_SSDP_COPY  1
+ /* @} */
+ 
+ 
