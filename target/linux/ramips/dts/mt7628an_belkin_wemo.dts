@@ -35,13 +35,13 @@
 		compatible = "gpio-leds";
 		amber: amber {
 			label = "amber";
-			gpios = <&gpio 17 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio 17 GPIO_ACTIVE_LOW>;
 			default-state = "off";
 			linux,default-trigger = "none";
 		};
 		white: white {
 			label = "white";
-			gpios = <&gpio 16 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio 16 GPIO_ACTIVE_LOW>;
 			default-state = "on";
 			linux,default-trigger = "timer";
 		};
@@ -70,27 +70,27 @@
 
 			partition@0 {
 				label = "Uboot";
-				reg = <0x0 0x50000>;
+				reg = <0x0 0x30000>;
 			};
 			partition@50000 {
 				label = "kernel_1";
-				reg = <0x50000 0x1D0000>;
+				reg = <0x50000 0x1D0000>; /* max 1900544 bytes */
 			};
 			partition@220000 {
 				label = "rootfs_1";
-				reg = <0x220000 0x5a0000>;
+				reg = <0x220000 0x590000>; /* max 5832704 bytes */
 			};
 			partition@7c0000 {
 				label = "kernel_2";
-				reg = <0x7c0000 0x1D0000>;
+				reg = <0x7c0000 0x1D0000>; /* max 1900544 bytes */
 			};
 			partition@990000 {
 				label = "rootfs_2";
-				reg = <0x990000 0x570000>;
+				reg = <0x990000 0x590000>; /* max 5832704 bytes */
 			};
-			partition@f00000 {
+			partition@f20000 {
 				label = "rootfs_data";
-				reg = <0xf00000 0x50000>;
+				reg = <0xf20000 0xc0000>; /* max 768KiB */
 			};
 			partition@fe0000 {
 				label = "nvram";
@@ -116,10 +116,6 @@
 			partition@7b0000 {
 				label = "homekit";
 				reg = <0x7b0000 0x10000>;
-			};
-			partition@f50000 {
-				label = "Belkin_settings";
-				reg = <0xf50000 0x90000>;
 			};
 			partition@30000 {
 				label = "Uboot_env";
