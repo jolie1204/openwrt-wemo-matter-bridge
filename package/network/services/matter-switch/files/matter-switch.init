@@ -3,8 +3,33 @@ START=98
 USE_PROCD=1
 
 start_service() {
+  # Read from NVRAM and sanitize
+  local SERIAL HW_RAW HW_VER
+
+  SERIAL="$(/sbin/nvram get SerialNumber 2>/dev/null || true)"
+  # strip newlines and allow only safe chars (Matter strings should be ASCII)
+  SERIAL="$(echo -n "$SERIAL" | tr -d '\r\n' | tr -cd 'A-Za-z0-9._-')"
+  [ -z "$SERIAL" ] && SERIAL="WEMO-UNKNOWN"
+
+  HW_RAW="$(/sbin/nvram get hwVersion 2>/dev/null || true)"
+  case "$HW_RAW" in
+    (''|*[!0-9]*) HW_VER=1 ;;   # fallback if empty/non-numeric
+    (*)           HW_VER="$HW_RAW" ;;
+  esac
+
   procd_open_instance
-  procd_set_param command /usr/sbin/matter-switchd --passcode 20202021 --discriminator 3840
-  procd_set_param respawn
+  procd_set_param command /usr/sbin/matter-switchd \
+    --passcode 20202021 \
+    --discriminator 3840 \
+    --serial-number "$SERIAL" \
+    --hardware-version "$HW_VER" 
+    # You can also add --hardware-version-string "$HW_VER" if you want a string visible in Descriptor
+
+  # Optional: if you didn’t bake names into TARGET_CFLAGS, add them here:
+  #   --vendor-id 0xFFF1 --product-id 0x8001 \
+  #   --vendor-name "Belkin" --product-name "Wemo Mini"
+
+  # procd respawn: (ms between, at least N tries, within M seconds)
+  procd_set_param respawn 3000 1 5
   procd_close_instance
 }

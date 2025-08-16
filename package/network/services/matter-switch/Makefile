@@ -75,7 +75,9 @@ TARGET_CFLAGS += \
   -DCHIP_CONFIG_KVS_PATH=\"$(CONF_DIR)/chip_kvs.ini\" \
   -DFATCONFDIR=\"$(CONF_DIR)\" \
   -DSYSCONFDIR=\"$(CONF_DIR)\" \
-  -DLOCALSTATEDIR=\"$(CONF_DIR)\"
+  -DLOCALSTATEDIR=\"$(CONF_DIR)\" \
+  -DCHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME=\"Wemo\" \
+  -DCHIP_DEVICE_CONFIG_DEVICE_PRODUCT_NAME=\"Mini\"
 
 # Silence musl fortify nonliteral printf warnings (you hit this before)
 TARGET_CFLAGS   += -Wno-format-nonliteral
@@ -89,16 +91,33 @@ OUT_DIR:=$(PKG_BUILD_DIR)/out/openwrt
 UPSTREAM_APP_DIR := $(PKG_BUILD_DIR)/examples/lighting-app/linux
 LOCAL_SRC_DIR    := $(CURDIR)/src
 
+LOCAL_APP_DIR    := $(LOCAL_SRC_DIR)/linux
+LOCAL_COMMON_DIR := $(LOCAL_SRC_DIR)/wemo-switch-common
+COMMON_DST_DIR   := $(PKG_BUILD_DIR)/examples/lighting-app/wemo-switch-common
+
 define Build/Prepare
 	# 1) fetch/extract SDK
 	$(call Build/Prepare/Default)
-	# 2) overlay your changes into the SDK app dir
+
+	# 2) overlay your app + common into the CHIP tree
 ifneq ($(wildcard $(LOCAL_SRC_DIR)),)
-	# sanity check: expect files like main.cpp inside $(LOCAL_SRC_DIR)
-	[ -f $(LOCAL_SRC_DIR)/main.cpp ] || \
-	  { echo "ERROR: $(LOCAL_SRC_DIR)/main.cpp not found; did you copy lighting-app/linux into src/?"; exit 1; }
-	# overlay copy: src/* -> examples/lighting-app/linux/
-	tar -C $(LOCAL_SRC_DIR) -cf - . | tar -C $(UPSTREAM_APP_DIR) -xf -
+	# sanity checks
+	[ -f $(LOCAL_APP_DIR)/main.cpp ] || { echo "ERROR: $(LOCAL_APP_DIR)/main.cpp not found"; exit 1; }
+	[ -f $(LOCAL_COMMON_DIR)/BUILD.gn ] || { echo "ERROR: $(LOCAL_COMMON_DIR)/BUILD.gn not found"; exit 1; }
+
+	# ensure destinations exist
+	mkdir -p $(UPSTREAM_APP_DIR) $(COMMON_DST_DIR)
+
+	# (A) overlay linux app sources into examples/lighting-app/linux
+	#     exclude the local third_party redirect
+	( cd $(LOCAL_APP_DIR) && tar --exclude='./third_party' -cf - . ) | \
+	  ( cd $(UPSTREAM_APP_DIR) && tar -xf - )
+
+	# (B) overlay common bits into examples/lighting-app/wemo-switch-common
+	tar -C $(LOCAL_COMMON_DIR) -cf - . | tar -C $(COMMON_DST_DIR) -xf -
+
+	# quick check for the ZAP (since you're using ZAP path)
+	[ -f $(COMMON_DST_DIR)/lighting-app.zap ] || { echo "ERROR: lighting-app.zap not found in $(COMMON_DST_DIR)"; exit 1; }
 endif
 endef
 

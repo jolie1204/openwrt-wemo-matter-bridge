@@ -36,6 +36,8 @@
 
 #endif
 
+#include "RelayManager.h"
+
 using namespace chip;
 using namespace chip::app;
 using namespace chip::app::Clusters;
@@ -77,6 +79,11 @@ void emberAfOnOffClusterInitCallback(EndpointId endpoint)
 
 void ApplicationInit()
 {
+	// Initialize relay + sync white LED to current relay state
+	RelayManager::Instance().Init(
+		"/sys/class/gpio/relay/value",
+		"/sys/class/leds/white/brightness");
+
     std::string path = std::string(LinuxDeviceOptions::GetInstance().app_pipe);
 
     if ((!path.empty()) and (sChipNamedPipeCommands.Start(path, &sLightingAppCommandDelegate) != CHIP_NO_ERROR))
