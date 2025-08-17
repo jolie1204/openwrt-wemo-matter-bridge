@@ -28,7 +28,7 @@ config device
 
 # LAN gets its IP via DHCP (client)
 config interface 'lan'
-	option device 'br-lan'
+	option device 'apcli0'
 	option proto 'dhcp'
 
 # Onboarding AP (unchanged)
@@ -37,14 +37,4 @@ config interface 'setup_ap'
 	option proto 'static'
 	option ipaddr '10.22.22.1'
 	option netmask '255.255.255.0'
-
-# Wi-Fi STA uplink (unchanged)
-config interface 'wwan'
-	option device 'apcli0'
-	option proto 'dhcp'
-
-# Optional wired WAN on the WAN jack
-config interface 'wan'
-	option device 'eth0.2'
-	option proto 'dhcp'
 
