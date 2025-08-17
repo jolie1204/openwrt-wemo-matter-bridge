@@ -1,0 +1,31 @@
+#!/bin/sh
+# Runs alongside base-files' 00-button dispatcher
+# ENV: BUTTON, ACTION, SEEN (seconds since last event; not always set)
+
+[ "$BUTTON" = "reset" ] || exit 0
+
+case "$ACTION" in
+  pressed)
+    # fallback timer if SEEN isn't reliable
+    date +%s >/tmp/wemo-reset-pressed.ts
+    ;;
+  released)
+    # prefer SEEN if exported by procd
+    hold="${SEEN:-}"
+    if [ -z "$hold" ]; then
+      t0="$(cat /tmp/wemo-reset-pressed.ts 2>/dev/null || echo 0)"
+      now="$(date +%s)"
+      hold=$((now - t0))
+    fi
+    rm -f /tmp/wemo-reset-pressed.ts
+
+    # choose a threshold higher than OpenWrt failsafe (typically ~5s)
+    if [ "$hold" -ge 10 ]; then
+      logger -t wemo-reset "Long-press ${hold}s -> factory reset overlay"
+      /etc/init.d/matter-switch stop 2>/dev/null
+      sync
+      mtd -r erase rootfs_data   # reboot after erase
+    fi
+    ;;
+esac
+
