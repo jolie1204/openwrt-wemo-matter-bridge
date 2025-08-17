@@ -1,0 +1,29 @@
+config wifi-device 'radio0'
+	option type 'mac80211'
+	option path 'platform/10300000.wmac'
+	option band '2g'
+	option channel '6'          # fixed is nicer for onboarding; can use 'auto'
+	option htmode 'HT20'
+	option country 'US'
+
+# Setup AP used only during onboarding
+config wifi-iface 'ap_setup'
+	option device 'radio0'
+	option mode 'ap'
+	option ifname 'ra0'         # keep legacy name
+	option network 'setup_ap'
+	option ssid 'Device-Setup'  # change; can append last 4 MAC digits
+	option encryption 'none'    # or 'none' if you insist on open
+	option disabled '0'
+
+# STA (real network) — stays disabled until phone sends creds
+config wifi-iface 'sta_radio0'
+	option device 'radio0'
+	option mode 'sta'
+	option ifname 'apcli0'      # keep legacy name
+	option network 'wwan'
+	option ssid ''              # filled by provisioner
+	option encryption 'psk2'    # or 'sae-mixed' if you ship full wpad
+	option key ''               # filled by provisioner
+	option disabled '1'
+

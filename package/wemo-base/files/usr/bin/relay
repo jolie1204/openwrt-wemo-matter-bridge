@@ -1,0 +1,61 @@
+#!/bin/sh
+# /usr/bin/relay  (make executable: chmod 0755 /usr/bin/relay)
+
+RELAY=/sys/class/gpio/relay/value              # from gpio-export
+LED=/sys/class/leds/white/brightness           # from gpio-leds "white"
+
+ensure_relay() {
+    [ -e "$RELAY" ] && return 0
+    # Fallback if gpio-export missing: export GPIO19 as output (active-high)
+    [ -d /sys/class/gpio/gpio19 ] || echo 19 > /sys/class/gpio/export 2>/dev/null
+    echo out > /sys/class/gpio/gpio19/direction 2>/dev/null
+    ln -sf /sys/class/gpio/gpio19/value "$RELAY" 2>/dev/null
+}
+
+ensure_led() {
+    [ -e "$LED" ] && return 0
+    # Try to find a path if label is slightly different
+    LED="$(ls /sys/class/leds/*white*/brightness 2>/dev/null | head -n1)"
+}
+
+set_led_from_relay() {
+    ensure_led
+    [ -n "$LED" ] || return 0
+    val=$(cat "$RELAY" 2>/dev/null)
+    # gpio-leds handles active-low internally: nonzero brightness = ON
+    if [ "$val" = "1" ]; then
+        echo 1 > "$LED"
+    else
+        echo 0 > "$LED"
+    fi
+}
+
+ensure_relay
+
+case "$1" in
+  set)
+    # usage: relay set 0|1
+    echo "${2:-0}" > "$RELAY"
+    set_led_from_relay
+    ;;
+  toggle)
+    cur=$(cat "$RELAY" 2>/dev/null)
+    [ "$cur" = "0" ] && nxt=1 || nxt=0
+    echo "$nxt" > "$RELAY"
+    set_led_from_relay
+    ;;
+  longpress)
+    # example action on long-press: force OFF
+    echo 0 > "$RELAY"
+    set_led_from_relay
+    ;;
+  sync)
+    # just re-sync LED to current relay state (for boot)
+    set_led_from_relay
+    ;;
+  *)
+    echo "Usage: relay {set 0|1|toggle|longpress|sync}" >&2
+    exit 1
+    ;;
+esac
+

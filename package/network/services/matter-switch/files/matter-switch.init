@@ -1,35 +1,91 @@
 #!/bin/sh /etc/rc.common
+# Matter switch daemon (procd-managed)
 START=98
 USE_PROCD=1
 
-start_service() {
-  # Read from NVRAM and sanitize
-  local SERIAL HW_RAW HW_VER
+CFG=/etc/config/matter
+SECT=matter    # UCI section name: config matter 'matter'
+NVRAM=/sbin/nvram
 
-  SERIAL="$(/sbin/nvram get SerialNumber 2>/dev/null || true)"
-  # strip newlines and allow only safe chars (Matter strings should be ASCII)
-  SERIAL="$(echo -n "$SERIAL" | tr -d '\r\n' | tr -cd 'A-Za-z0-9._-')"
-  [ -z "$SERIAL" ] && SERIAL="WEMO-UNKNOWN"
+# keep sane defaults if nothing provided
+DEF_PASSCODE=20202021
+DEF_DISC=3840
 
-  HW_RAW="$(/sbin/nvram get hwVersion 2>/dev/null || true)"
-  case "$HW_RAW" in
-    (''|*[!0-9]*) HW_VER=1 ;;   # fallback if empty/non-numeric
-    (*)           HW_VER="$HW_RAW" ;;
-  esac
+sanitize_ascii() { tr -cd 'A-Za-z0-9._-'; }
+nvram_get() { "$NVRAM" get "$1" 2>/dev/null; }
+uci_get()  { uci -q get "matter.$SECT.$1"; }
+uci_has_section() { uci -q get "matter.$SECT" >/dev/null 2>&1; }
 
-  procd_open_instance
-  procd_set_param command /usr/sbin/matter-switchd \
-    --passcode 20202021 \
-    --discriminator 3840 \
-    --serial-number "$SERIAL" \
-    --hardware-version "$HW_VER" 
-    # You can also add --hardware-version-string "$HW_VER" if you want a string visible in Descriptor
+ensure_uciconfig()
+{
+	# ensure package + named section exist
+	[ -f "$CFG" ] || touch "$CFG"
+	if ! uci_has_section; then
+		uci -q set matter.$SECT=matter
+		created=1
+	fi
 
-  # Optional: if you didn’t bake names into TARGET_CFLAGS, add them here:
-  #   --vendor-id 0xFFF1 --product-id 0x8001 \
-  #   --vendor-name "Belkin" --product-name "Wemo Mini"
+	# fill from NVRAM only if missing in UCI
+	serial="$(uci_get serial)"
+	if [ -z "$serial" ]; then
+		nv_sn="$(nvram_get SerialNumber | tr -d '\r\n' | sanitize_ascii)"
+		[ -n "$nv_sn" ] || nv_sn="WEMO-UNKNOWN"
+		uci -q set matter.$SECT.serial="$nv_sn"
+		created=1
+	fi
 
-  # procd respawn: (ms between, at least N tries, within M seconds)
-  procd_set_param respawn 3000 1 5
-  procd_close_instance
+	hwv="$(uci_get hardware_version)"
+	if [ -z "$hwv" ]; then
+		nv_hw="$(nvram_get hwVersion | tr -d '\r\n')"
+		case "$nv_hw" in (''|*[!0-9]*) nv_hw=1 ;; esac
+		uci -q set matter.$SECT.hardware_version="$nv_hw"
+		created=1
+	fi
+
+	# sensible defaults for the rest if missing
+	[ -n "$(uci_get passcode)" ]      || { uci -q set matter.$SECT.passcode="$DEF_PASSCODE"; created=1; }
+	[ -n "$(uci_get discriminator)" ] || { uci -q set matter.$SECT.discriminator="$DEF_DISC"; created=1; }
+
+	[ "$created" = 1 ] && uci -q commit matter
 }
+
+start_service()
+{
+	ensure_uciconfig
+
+	PASSCODE="$(uci_get passcode)";          [ -n "$PASSCODE" ] || PASSCODE="$DEF_PASSCODE"
+	DISC="$(uci_get discriminator)";         [ -n "$DISC" ]     || DISC="$DEF_DISC"
+	SERIAL="$(uci_get serial)";              [ -n "$SERIAL" ]   || SERIAL="WEMO-UNKNOWN"
+	HWVER="$(uci_get hardware_version)";     [ -n "$HWVER" ]    || HWVER=1
+
+	procd_open_instance
+	procd_set_param command /usr/sbin/matter-switchd \
+		--passcode "$PASSCODE" \
+		--discriminator "$DISC" \
+		--serial-number "$SERIAL" \
+		--hardware-version "$HWVER"
+
+	# If your daemon supports it, you can pin to Wi-Fi STA:
+	# procd_append_param command --ifname apcli0
+
+	# Send logs to logd -> visible in `logread`
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+
+	# Restart on crash; and when /etc/config/matter changes
+	procd_set_param respawn 3000 5 5
+	procd_set_param file "$CFG"
+	procd_close_instance
+}
+
+reload_service() {
+	# pick up new UCI values
+	stop
+	start
+}
+
+service_triggers() {
+	# allow `/etc/init.d/matter-switch reload` after `uci commit matter`
+	procd_add_reload_trigger matter
+}
+
