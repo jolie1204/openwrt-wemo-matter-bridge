@@ -21,7 +21,7 @@ config wifi-iface 'sta_radio0'
 	option device 'radio0'
 	option mode 'sta'
 	option ifname 'apcli0'      # keep legacy name
-	option network 'wwan'
+	option network 'lan'
 	option ssid ''              # filled by provisioner
 	option encryption 'psk2'    # or 'sae-mixed' if you ship full wpad
 	option key ''               # filled by provisioner
