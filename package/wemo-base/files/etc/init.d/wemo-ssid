@@ -1,0 +1,161 @@
+#!/bin/sh /etc/rc.common
+START=17
+USE_PROCD=1
+
+NVRAM=/sbin/nvram
+MATTERCFG=/etc/config/matter
+KVS=/etc/matter/chip_kvs.ini
+
+# ---------- helpers ----------
+sanitize_ascii() { tr -cd 'A-Za-z0-9._-'; }
+nvram_get() { "$NVRAM" get "$1" 2>/dev/null; }
+uci_get()  { uci -q get "$1"; }
+be16() { # big-endian 16-bit -> hex (two bytes)
+	local v=$(($1+0)); printf "%02x%02x" $(( (v>>8) & 0xFF )) $(( v & 0xFF ))
+}
+
+# Pick prefix + PID from SerialNumber
+pick_model() {
+	# sets: PREF PID_HEX
+	local SN="$1"
+	case "$SN" in
+		*K??1*) PREF="Wemo.Mini.";   PID_HEX="8001" ;; # SwitchV2/Mini
+		*K??3*) PREF="Wemo.Light.";  PID_HEX="8002" ;;
+		*K??5*) PREF="Wemo.Dimmer."; PID_HEX="8003" ;;
+		*)      PREF="Wemo.Mini.";   PID_HEX="8001" ;;
+	esac
+}
+
+mk_ssid() {
+	local SN PREF TAIL
+	SN="$(nvram_get SerialNumber | tr -d '\r\n' | sanitize_ascii)"
+	[ -n "$SN" ] || SN="WEMO-UNKNOWN"
+	pick_model "$SN"
+	TAIL="$(echo -n "$SN" | sed -n 's/.*\([0-9][0-9][0-9]\)$/\1/p')"
+	[ -n "$TAIL" ] || TAIL="000"
+	echo -n "${PREF}${TAIL}"
+}
+
+# Build a hostapd vendor IE: dd <len> <OUI d0d0d0> <subtype 01> TLVs...
+# TLVs: 01:VID(2B), 02:PID(2B), 03:DISC(2B), 04:PASS4(2B), 05:CM(1B)
+mk_vendor_ie() {
+	# inputs from UCI + NVRAM
+	local PASS DISC SN VID_HEX PID LOCAL_OUI="d0d0d0" SUBTYPE="01"
+	PASS="$(uci_get matter.matter.passcode)";      [ -n "$PASS" ] || PASS=20202021
+	DISC="$(uci_get matter.matter.discriminator)"; [ -n "$DISC" ] || DISC=3840
+	SN="$(nvram_get SerialNumber | tr -d '\r\n' | sanitize_ascii)"
+	[ -n "$SN" ] || SN="WEMO-UNKNOWN"
+	VID_HEX="$(uci_get matter.matter.vendor_id)";  [ -n "$VID_HEX" ] || VID_HEX="FFF1"
+	pick_model "$SN"; PID="$PID_HEX"
+
+	# derive values
+	local pass4=$(( PASS % 10000 ))
+	local disc=$(( DISC & 0x0FFF ))
+
+	# TLVs in hex (type len value...)
+	local TLV_VID="01$(be16 0x0002)$(echo "$VID_HEX" | awk '{printf "%04s", toupper($0)}')"
+	local TLV_PID="02$(be16 0x0002)$(echo "$PID"    | awk '{printf "%04s", toupper($0)}')"
+	local TLV_DSC="03$(be16 0x0002)$(be16 $disc)"
+	local TLV_P4="04$(be16 0x0002)$(be16 $pass4)"
+	local TLV_CM="05$(be16 0x0001)01"
+
+	local BODY="${LOCAL_OUI}${SUBTYPE}${TLV_VID}${TLV_PID}${TLV_DSC}${TLV_P4}${TLV_CM}"
+	local LEN=$(printf "%02x" $(( ${#BODY} / 2 )))
+
+	echo "dd${LEN}${BODY}"
+}
+
+# Consider device "commissioned" if KVS shows fabric/op creds artifacts (coarse but works)
+is_commissioned() {
+	[ -s "$KVS" ] || return 1
+	grep -qiE 'Fabric|AddNOC|TrustedRoot|OpCreds|NOC' "$KVS"
+}
+
+apply_wireless() {
+	# ensure wireless exists
+	[ -f /etc/config/wireless ] || wifi config
+
+	local NEWSSID CURSSID VIE
+	NEWSSID="$(mk_ssid)"
+	CURSSID="$(uci -q get wireless.ap_setup.ssid || echo)"
+
+	# Always ensure AP is present/enabled while in setup
+	uci -q set wireless.ap_setup.mode='ap'
+	uci -q set wireless.ap_setup.device='radio0'
+	uci -q set wireless.ap_setup.ifname='ra0'
+	uci -q set wireless.ap_setup.network='setup_ap'
+	uci -q set wireless.ap_setup.encryption='none'
+
+	# SSID update
+	if [ "$CURSSID" != "$NEWSSID" ]; then
+		uci -q set wireless.ap_setup.ssid="$NEWSSID"
+	fi
+
+	# Seed Vendor IE (hostapd vendor_elements)
+	VIE="$(mk_vendor_ie)"
+	uci -q set wireless.ap_setup.vendor_elements="$VIE"
+
+	# Enable AP while in setup; may be flipped off by maybe_disable_ap()
+	uci -q set wireless.ap_setup.disabled='0'
+
+	uci -q commit wireless
+	wifi reload 2>/dev/null || wifi
+	logger -t wemo-ssid "AP SSID='${NEWSSID}', vendor_elements='${VIE}'"
+}
+
+maybe_disable_ap() {
+	if is_commissioned; then
+		uci -q set wireless.ap_setup.disabled='1'
+		uci -q commit wireless
+		wifi reload 2>/dev/null || wifi
+		logger -t wemo-ssid "Commissioned: disabling onboarding AP (ra0)"
+	fi
+}
+
+# ---------- procd ----------
+start_service() {
+	# Optional: wipe legacy settings (keep commented unless you really need it)
+	# mtd erase Belkin_settings
+
+	# Ensure /etc/config/matter exists with defaults (passcode/discriminator)
+	if [ ! -f "$MATTERCFG" ]; then
+		cat >"$MATTERCFG" <<'EOF'
+config matter 'matter'
+	option passcode '20202021'
+	option discriminator '3840'
+	# optional: option vendor_id 'FFF1'
+EOF
+	fi
+
+	apply_wireless
+	maybe_disable_ap
+
+	# Lightweight watcher loop (exits once commissioned)
+	procd_open_instance
+	procd_set_param command /bin/sh -c '
+		for i in $(seq 1 720); do
+			if [ -s "'$KVS'" ] && grep -qiE "Fabric|AddNOC|TrustedRoot|OpCreds|NOC" "'$KVS'"; then
+				uci set wireless.ap_setup.disabled=1
+				uci commit wireless
+				wifi reload 2>/dev/null || wifi
+				logger -t wemo-ssid "Watcher: commissioned -> AP off"
+				exit 0
+			fi
+			sleep 5
+		done
+		exit 0
+	'
+	procd_set_param respawn 0 0 0
+	procd_close_instance
+}
+
+reload_service() {
+	apply_wireless
+	maybe_disable_ap
+}
+
+service_triggers() {
+	# If matter UCI changes (passcode/discriminator/vendor_id), rebuild IE/SSID
+	procd_add_reload_trigger matter wireless
+}
+

@@ -1,0 +1,28 @@
+#!/bin/sh
+# Disable SoftAP after commissioning completes (based on matter-switchd logs)
+
+AP_UCI_IF=${AP_UCI_IF:-ap_setup}
+
+PATTERN='(OpCreds: successfully created fabric index|Advertise operational node|CASE Session established to peer)'
+
+logread -f | while IFS= read -r line; do
+  echo "$line" | grep -E "$PATTERN" >/dev/null || continue
+
+  # Turn off the onboarding AP
+  uci -q set wireless.$AP_UCI_IF.disabled='1'
+  uci -q commit wireless
+
+  # If hostapd is running, apply without touching STA
+  if command -v hostapd_cli >/dev/null 2>&1; then
+    # If we know the AP ifname, we can bring it down explicitly:
+    ap_if="$(uci -q get wireless.$AP_UCI_IF.ifname 2>/dev/null)"
+    [ -n "$ap_if" ] && ifconfig "$ap_if" down 2>/dev/null
+  fi
+
+  # Fallback: a generic reload is fine too
+  /sbin/wifi reload 2>/dev/null
+
+  # One-shot; exit after disabling AP
+  exit 0
+done
+

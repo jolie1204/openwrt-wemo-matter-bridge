@@ -135,9 +135,10 @@ define Build/Compile
 endef
 
 define Package/matter-switch/Default/install
-	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc/init.d $(1)$(CONF_DIR) $(1)/usr/share/matter
+	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc/init.d $(1)$(CONF_DIR) $(1)/usr/share/matter $(1)/etc/config
 	$(INSTALL_BIN) $(OUT_DIR)/chip-lighting-app $(1)/usr/sbin/matter-switchd
 	$(INSTALL_BIN) ./files/matter-switch.init $(1)/etc/init.d/matter-switch
+	$(INSTALL_CONF) ./files/matter.config $(1)/etc/config/matter
 	$(INSTALL_DATA) ./files/bootstrap.sh $(1)/usr/share/matter/bootstrap.sh
 endef
 

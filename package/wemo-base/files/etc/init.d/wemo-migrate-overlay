@@ -1,0 +1,40 @@
+#!/bin/sh /etc/rc.common
+# One-time overlay wipe when migrating from legacy images
+# Safer than raw `mtd erase`: uses jffs2reset/firstboot machinery.
+
+START=02
+USE_PROCD=1
+
+# Return mtd index number for rootfs_data (e.g. "7" for /dev/mtd7)
+mtd_index_rootfs_data() {
+    awk -F: '/"rootfs_data"/ { gsub("mtd", "", $1); print substr($1,1); exit }' /proc/mtd
+}
+
+legacy_signature_found() {
+    local idx sig
+    idx="$(mtd_index_rootfs_data)" || return 1
+    [ -n "$idx" ] || return 1
+
+    # Read the first ~1MB; look for strings that only occur on legacy images.
+    # Adjust the grep to match something reliable from your old overlay.
+    dd if="/dev/mtd$idx" bs=4096 count=256 2>/dev/null \
+      | strings \
+      | grep -qiE 'Belkin_settings|BELKIN|WEMO_NV|wemo_nvram'
+}
+
+start_service() {
+    # If overlay is not up yet, mount state may be transient—just run the check.
+    if legacy_signature_found; then
+        logger -t wemo-migrate "Legacy overlay detected in rootfs_data; wiping via jffs2reset"
+        # Will unmount overlay, erase the correct partition, and reboot.
+        jffs2reset -y
+        # Fallback if jffs2reset isn’t found on your image:
+        # firstboot -y
+        sleep 2
+        reboot -f
+        exit 0
+    else
+        logger -t wemo-migrate "Overlay looks clean; no action"
+    fi
+}
+
