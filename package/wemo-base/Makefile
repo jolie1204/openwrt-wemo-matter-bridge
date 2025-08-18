@@ -27,7 +27,6 @@ define Package/wemo-base/install
 	$(INSTALL_DIR) \
 		$(1)/etc/config \
 		$(1)/etc/init.d \
-		$(1)/etc/hotplug.d/iface \
 		$(1)/etc/hotplug.d/button \
 		$(1)/usr/bin \
 		$(1)/usr/sbin
@@ -43,13 +42,12 @@ define Package/wemo-base/install
 	$(INSTALL_BIN)  ./files/etc/init.d/wemo-migrate-overlay        $(1)/etc/init.d/wemo-migrate-overlay
 
 	# Hotplug snippets (0755)
-	$(INSTALL_BIN)  ./files/etc/hotplug.d/iface/30-wemo-ap-vendorie $(1)/etc/hotplug.d/iface/30-wemo-ap-vendorie
 	$(INSTALL_BIN)  ./files/etc/hotplug.d/button/95-wemo-reset      $(1)/etc/hotplug.d/button/95-wemo-reset
 
 	# Binaries / scripts (0755)
 	$(INSTALL_BIN)  ./files/usr/bin/relay            $(1)/usr/bin/relay
 	$(INSTALL_BIN)  ./files/usr/sbin/provision.sh    $(1)/usr/sbin/provision.sh
-	$(INSTALL_BIN)  ./files/usr/sbin/wemo-commisioning-watcher $(1)/usr/sbin/wemo-commisioning-watcher
+	$(INSTALL_BIN)  ./files/usr/sbin/wemo-commissioning-watcher $(1)/usr/sbin/wemo-commissioning-watcher
 endef
 
 define Package/wemo-base/conffiles
