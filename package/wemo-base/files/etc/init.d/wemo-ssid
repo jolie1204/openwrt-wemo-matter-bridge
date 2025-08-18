@@ -10,13 +10,28 @@ KVS=/etc/matter/chip_kvs.ini
 sanitize_ascii() { tr -cd 'A-Za-z0-9._-'; }
 nvram_get() { "$NVRAM" get "$1" 2>/dev/null; }
 uci_get()  { uci -q get "$1"; }
-be16() { # big-endian 16-bit -> hex (two bytes)
-	local v=$(($1+0)); printf "%02x%02x" $(( (v>>8) & 0xFF )) $(( v & 0xFF ))
+
+# 16-bit -> little-endian hex (from decimal)
+le16_from_dec() {
+	local v=$(( $1 + 0 ))
+	local lo=$(( v & 0xFF ))
+	local hi=$(( (v >> 8) & 0xFF ))
+	printf "%02x%02x" "$lo" "$hi"
+}
+
+# 16-bit -> little-endian hex (from hex string, e.g. "FFF1" or "0xFFF1")
+le16_from_hex() {
+	local h="${1#0x}"; h="${h#0X}"
+	# normalize to 4 hex nibbles
+	local x
+	x=$(printf "%04x" $((16#$h)))
+	# swap bytes
+	printf "%s%s" "${x:2:2}" "${x:0:2}"
 }
 
 # Pick prefix + PID from SerialNumber
+# sets: PREF PID_HEX (hex string, no 0x)
 pick_model() {
-	# sets: PREF PID_HEX
 	local SN="$1"
 	case "$SN" in
 		*K??1*) PREF="Wemo.Mini.";   PID_HEX="8001" ;; # SwitchV2/Mini
@@ -36,11 +51,11 @@ mk_ssid() {
 	echo -n "${PREF}${TAIL}"
 }
 
-# Build a hostapd vendor IE: dd <len> <OUI d0d0d0> <subtype 01> TLVs...
-# TLVs: 01:VID(2B), 02:PID(2B), 03:DISC(2B), 04:PASS4(2B), 05:CM(1B)
+# Build CSA/Matter SoftAP Vendor IE for hostapd vendor_elements:
+# dd <len> d2 04 00  01 01 01  02 02 <VID_le>  03 02 <PID_le>  04 02 <DISC_le>  05 01 01
 mk_vendor_ie() {
-	# inputs from UCI + NVRAM
-	local PASS DISC SN VID_HEX PID LOCAL_OUI="d0d0d0" SUBTYPE="01"
+	local PASS DISC SN VID_HEX PID
+	local OUI="d20400"    # CSA (00:04:D2)
 	PASS="$(uci_get matter.matter.passcode)";      [ -n "$PASS" ] || PASS=20202021
 	DISC="$(uci_get matter.matter.discriminator)"; [ -n "$DISC" ] || DISC=3840
 	SN="$(nvram_get SerialNumber | tr -d '\r\n' | sanitize_ascii)"
@@ -48,54 +63,60 @@ mk_vendor_ie() {
 	VID_HEX="$(uci_get matter.matter.vendor_id)";  [ -n "$VID_HEX" ] || VID_HEX="FFF1"
 	pick_model "$SN"; PID="$PID_HEX"
 
-	# derive values
+	# normalize values
 	local pass4=$(( PASS % 10000 ))
-	local disc=$(( DISC & 0x0FFF ))
+	local disc12=$(( DISC & 0x0FFF ))
 
-	# TLVs in hex (type len value...)
-	local TLV_VID="01$(be16 0x0002)$(echo "$VID_HEX" | awk '{printf "%04s", toupper($0)}')"
-	local TLV_PID="02$(be16 0x0002)$(echo "$PID"    | awk '{printf "%04s", toupper($0)}')"
-	local TLV_DSC="03$(be16 0x0002)$(be16 $disc)"
-	local TLV_P4="04$(be16 0x0002)$(be16 $pass4)"
-	local TLV_CM="05$(be16 0x0001)01"
+	# LE encodings
+	local VID_LE PID_LE DISC_LE PASS4_LE
+	VID_LE="$(le16_from_hex "$VID_HEX")"
+	PID_LE="$(le16_from_hex "$PID")"
+	DISC_LE="$(le16_from_dec "$disc12")"
+	PASS4_LE="$(le16_from_dec "$pass4")"
 
-	local BODY="${LOCAL_OUI}${SUBTYPE}${TLV_VID}${TLV_PID}${TLV_DSC}${TLV_P4}${TLV_CM}"
+	# TLVs (type, len, value)
+	local TLV_VER="010101"               # Version = 1
+	local TLV_VID="0202${VID_LE}"        # Vendor ID (LE)
+	local TLV_PID="0302${PID_LE}"        # Product ID (LE)
+	local TLV_DSC="0402${DISC_LE}"       # Discriminator (LE)
+	local TLV_CM="050101"                # Commissioning Mode = 1
+
+	local BODY="${OUI}${TLV_VER}${TLV_VID}${TLV_PID}${TLV_DSC}${TLV_CM}"
 	local LEN=$(printf "%02x" $(( ${#BODY} / 2 )))
 
 	echo "dd${LEN}${BODY}"
 }
 
-# Consider device "commissioned" if KVS shows fabric/op creds artifacts (coarse but works)
+# Consider device commissioned if KVS contains OpCreds artifacts
 is_commissioned() {
 	[ -s "$KVS" ] || return 1
 	grep -qiE 'Fabric|AddNOC|TrustedRoot|OpCreds|NOC' "$KVS"
 }
 
 apply_wireless() {
-	# ensure wireless exists
 	[ -f /etc/config/wireless ] || wifi config
 
 	local NEWSSID CURSSID VIE
 	NEWSSID="$(mk_ssid)"
 	CURSSID="$(uci -q get wireless.ap_setup.ssid || echo)"
 
-	# Always ensure AP is present/enabled while in setup
+	# Ensure onboarding AP stanza exists
+	uci -q set wireless.ap_setup='wifi-iface'
 	uci -q set wireless.ap_setup.mode='ap'
 	uci -q set wireless.ap_setup.device='radio0'
 	uci -q set wireless.ap_setup.ifname='ra0'
 	uci -q set wireless.ap_setup.network='setup_ap'
 	uci -q set wireless.ap_setup.encryption='none'
 
-	# SSID update
-	if [ "$CURSSID" != "$NEWSSID" ]; then
-		uci -q set wireless.ap_setup.ssid="$NEWSSID"
-	fi
+	# Update SSID if changed
+	[ "$CURSSID" = "$NEWSSID" ] || uci -q set wireless.ap_setup.ssid="$NEWSSID"
 
 	# Seed Vendor IE (hostapd vendor_elements)
 	VIE="$(mk_vendor_ie)"
+	uci -q delete wireless.ap_setup.vendor_elements
 	uci -q set wireless.ap_setup.vendor_elements="$VIE"
 
-	# Enable AP while in setup; may be flipped off by maybe_disable_ap()
+	# Keep AP enabled during setup
 	uci -q set wireless.ap_setup.disabled='0'
 
 	uci -q commit wireless
@@ -114,23 +135,20 @@ maybe_disable_ap() {
 
 # ---------- procd ----------
 start_service() {
-	# Optional: wipe legacy settings (keep commented unless you really need it)
-	# mtd erase Belkin_settings
-
-	# Ensure /etc/config/matter exists with defaults (passcode/discriminator)
+	# Create default Matter config (if missing)
 	if [ ! -f "$MATTERCFG" ]; then
 		cat >"$MATTERCFG" <<'EOF'
 config matter 'matter'
 	option passcode '20202021'
 	option discriminator '3840'
-	# optional: option vendor_id 'FFF1'
+	# optional: vendor_id defaults to 'FFF1' if unset
 EOF
 	fi
 
 	apply_wireless
 	maybe_disable_ap
 
-	# Lightweight watcher loop (exits once commissioned)
+	# Watcher to auto-disable AP after commissioning (exits once done)
 	procd_open_instance
 	procd_set_param command /bin/sh -c '
 		for i in $(seq 1 720); do
@@ -155,7 +173,6 @@ reload_service() {
 }
 
 service_triggers() {
-	# If matter UCI changes (passcode/discriminator/vendor_id), rebuild IE/SSID
+	# Rebuild IE/SSID if Matter or Wireless UCI changes
 	procd_add_reload_trigger matter wireless
 }
-
