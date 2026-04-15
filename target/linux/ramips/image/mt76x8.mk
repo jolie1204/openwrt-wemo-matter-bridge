@@ -61,6 +61,29 @@ define Device/belkin_wemo
 endef
 TARGET_DEVICES += belkin_wemo
 
+define Device/wemo-matter-bridge
+  IMAGE_SIZE := 8000k
+  KERNEL_SIZE := 1536k
+  DEVICE_VENDOR := Belkin
+  DEVICE_MODEL := Wemo Matter Bridge
+  DEVICE_VARIANT := 16M
+  DEVICE_PACKAGES := kmod-mt76x2
+  SUPPORTED_DEVICES += wemo-matter-bridge
+  SUPPORTED_DEVICES += mt7628
+  IMAGE/sysupgrade.bin := append-kernel | pad-to $$$$(KERNEL_SIZE) | \
+	append-rootfs | pad-rootfs | check-size | append-metadata
+endef
+TARGET_DEVICES += wemo-matter-bridge
+
+define Device/wemo-matter-bridge-8m
+  $(Device/wemo-matter-bridge)
+  IMAGE_SIZE := 7872k
+  DEVICE_MODEL := Wemo Matter Bridge
+  DEVICE_VARIANT := 8M
+  SUPPORTED_DEVICES += wemo-matter-bridge-8m
+endef
+TARGET_DEVICES += wemo-matter-bridge-8m
+
 define Device/7links_wlr-12xx
   IMAGE_SIZE := 7872k
   DEVICE_VENDOR := 7Links
