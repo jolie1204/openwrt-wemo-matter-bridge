@@ -67,7 +67,9 @@ define Device/wemo-matter-bridge
   DEVICE_VENDOR := Belkin
   DEVICE_MODEL := Wemo Matter Bridge
   DEVICE_VARIANT := 16M
-  DEVICE_PACKAGES := kmod-mt76x2
+  DEVICE_PACKAGES := -hostapd-common -iw -kmod-cfg80211 -kmod-mac80211 \
+	-kmod-mt7603 -kmod-mt76x2 -wifi-scripts -wireless-regdb \
+	-wpad-basic-mbedtls
   SUPPORTED_DEVICES += wemo-matter-bridge
   SUPPORTED_DEVICES += mt7628
   IMAGE/sysupgrade.bin := append-kernel | pad-to $$$$(KERNEL_SIZE) | \
