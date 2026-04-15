@@ -30,12 +30,12 @@
 
 			partition@50000 {
 				label = "kernel";
-				reg = <0x50000 0x180000>;
+				reg = <0x50000 0x200000>;
 			};
 
-			partition@1d0000 {
+			partition@250000 {
 				label = "rootfs";
-				reg = <0x1d0000 0x630000>;
+				reg = <0x250000 0x5b0000>;
 			};
 
 			partition@30000 {
