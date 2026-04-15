@@ -1,13 +1,10 @@
-Index: linux-6.6.93/arch/mips/ralink/prom.c
-===================================================================
---- linux-6.6.93.orig/arch/mips/ralink/prom.c
-+++ linux-6.6.93/arch/mips/ralink/prom.c
+--- a/arch/mips/ralink/prom.c
++++ b/arch/mips/ralink/prom.c
 @@ -47,6 +47,12 @@ static __init void prom_init_cmdline(voi
  	for (i = 0; i < argc; i++) {
  		char *p = (char *) KSEG1ADDR(argv[i]);
  
-+		// for wemo device uboot blindly sets console to ttyS1,
-+		// override it to ttyS0.
++		/* Wemo U-Boot blindly sets console to ttyS1; use ttyS0. */
 +		if (!strcmp(p, "console=ttyS1,57600n8")) {
 +			p[12] = '0';
 +		}

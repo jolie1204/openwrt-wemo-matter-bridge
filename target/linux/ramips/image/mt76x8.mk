@@ -54,7 +54,7 @@ define Device/belkin_wemo
   IMAGE_SIZE := 7424k
   DEVICE_VENDOR := Belkin
   DEVICE_MODEL := wemo
-  DEVICE_PACKAGES := kmod-mt76x2 wemo-base
+  DEVICE_PACKAGES := kmod-mt76x2
   SUPPORTED_DEVICES += wemo
   SUPPORTED_DEVICES += mt7628
   IMAGE/sysupgrade.bin := append-kernel | pad-to $$$$(BLOCKSIZE) | append-rootfs
