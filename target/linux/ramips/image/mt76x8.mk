@@ -70,6 +70,7 @@ define Device/wemo-matter-bridge
   DEVICE_PACKAGES := -hostapd-common -iw -kmod-cfg80211 -kmod-mac80211 \
 	-kmod-mt7603 -kmod-mt76x2 -wifi-scripts -wireless-regdb \
 	-wpad-basic-mbedtls
+  SUPPORTED_DEVICES += belkin,wemo-matter-bridge
   SUPPORTED_DEVICES += wemo-matter-bridge
   SUPPORTED_DEVICES += mt7628
   IMAGE/sysupgrade.bin := append-kernel | pad-to $$$$(KERNEL_SIZE) | \
@@ -82,6 +83,7 @@ define Device/wemo-matter-bridge-8m
   IMAGE_SIZE := 7872k
   DEVICE_MODEL := Wemo Matter Bridge
   DEVICE_VARIANT := 8M
+  SUPPORTED_DEVICES += belkin,wemo-matter-bridge-8m
   SUPPORTED_DEVICES += wemo-matter-bridge-8m
 endef
 TARGET_DEVICES += wemo-matter-bridge-8m
