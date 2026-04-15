@@ -18,6 +18,7 @@ SCAN_DEPS=modules/*.mk $(SUBTARGET_MODULES) $(TOPDIR)/include/netfilter.mk
 
 PKG_LICENSE:=GPL-2.0-only
 PKG_LICENSE_FILES:=COPYING
+PKG_CPE_ID:=cpe:/o:linux:linux_kernel
 
 export SHELL:=/bin/sh
 .ONESHELL:
@@ -64,6 +65,7 @@ define Package/kernel/install
 	strings $(LINUX_DIR)/modules.builtin.modinfo | \
 		grep -E -v "\.(file$(if CONFIG_MODULE_STRIPPED,|parmtype))=" | \
 		tr '\n' '\0' > $(1)/$(MODULES_SUBDIR)/modules.builtin.modinfo
+	echo $(LINUX_VERSION)~$(LINUX_VERMAGIC)-r$(LINUX_RELEASE) > $(STAGING_DIR)/kernel.version
 endef
 
 define Package/kernel/extra_provides

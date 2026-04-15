@@ -88,4 +88,3 @@ service_triggers() {
 	# allow `/etc/init.d/matter-switch reload` after `uci commit matter`
 	procd_add_reload_trigger matter
 }
-

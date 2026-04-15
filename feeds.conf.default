@@ -1,6 +1,6 @@
-src-git packages https://git.openwrt.org/feed/packages.git^c7d1a8c1ae976bd0ad94a351d82ee8fbf16a81f0
-src-git luci https://git.openwrt.org/project/luci.git^d6b13f648339273facc07b173546ace459c1cabe
-src-git routing https://git.openwrt.org/feed/routing.git^85d040f28c21c116c905aa15a66255dde80336e7
-src-git telephony https://git.openwrt.org/feed/telephony.git^2a4541d46199ac96fac214d02c908402831c4dc6
+src-git packages https://git.openwrt.org/feed/packages.git^268d92d3d46147efe1e81892e3a618f8bbd4806b
+src-git luci https://git.openwrt.org/project/luci.git^067535eaf51a59582b775a8b588a9b05810f8030
+src-git routing https://git.openwrt.org/feed/routing.git^5b23ea12d417e5dba99788c5b34abdae81cccf33
+src-git telephony https://git.openwrt.org/feed/telephony.git^2618106d5846a4a542fdf5809f0d3ed228ce439b
+src-git video https://github.com/openwrt/video.git^094bf58da6682f895255a35a84349a79dab4bf95
 src-git --force matter https://github.com/project-chip/matter-openwrt.git
-

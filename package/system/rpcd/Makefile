@@ -12,9 +12,9 @@ PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=$(PROJECT_GIT)/project/rpcd.git
-PKG_MIRROR_HASH:=67b2cb985d8712a3e5a17ebf8c74fd35d553c8f9a4197616f9a3649a8740cc33
-PKG_SOURCE_DATE:=2024-09-17
-PKG_SOURCE_VERSION:=9f4b86e70352ab9ca6aa272d096419acc53e2390
+PKG_MIRROR_HASH:=1a701b15746f34eb19532f195d738611364a18acaf45c0197626c31ab59976ce
+PKG_SOURCE_DATE:=2025-12-03
+PKG_SOURCE_VERSION:=ffb9961c1f8bc50830fdd4e144570f11062c2601
 PKG_MAINTAINER:=Jo-Philipp Wich <jo@mein.io>
 
 PKG_LICENSE:=ISC
@@ -39,7 +39,7 @@ endef
 
 define Package/rpcd
   $(Package/rpcd/default)
-  DEPENDS+= +libuci +libblobmsg-json +libjson-c
+  DEPENDS+= +USE_GLIBC:libcrypt-compat +libuci +libblobmsg-json +libjson-c
 endef
 
 define Package/rpcd/description
