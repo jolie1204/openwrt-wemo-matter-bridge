@@ -8,10 +8,15 @@ ramips_setup_interfaces()
 	local board="$1"
 
 	case $board in
+	belkin,wemo-matter-bridge|\
+	belkin,wemo-matter-bridge-8m)
+		ucidef_add_switch "switch0"
+		ucidef_add_switch_attr "switch0" "enable" "false"
+		ucidef_set_interface_lan "eth0" "dhcp"
+		;;
 	7links,wlr-1230|\
 	7links,wlr-1240|\
 	alfa-network,awusfree1|\
-	belkin,wemo-matter-bridge|\
 	creality,wb-01|\
 	d-team,pbr-d1|\
 	dlink,dap-1325-a1|\
