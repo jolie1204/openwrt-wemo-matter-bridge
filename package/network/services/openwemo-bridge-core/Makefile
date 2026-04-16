@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openwemo-bridge-core
 PKG_VERSION:=0.1
-PKG_RELEASE:=4
+PKG_RELEASE:=5
 
 PKG_LICENSE:=BSD-3-Clause
 PKG_BUILD_PARALLEL:=1
@@ -60,11 +60,19 @@ define Build/Compile
 		RPATH_FLAGS= \
 		INCLUDES="-I../wemo_engine -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/upnp" \
 		LIBS="../wemo_engine/libwemoengine.a -lupnp -lixml -lsqlite3 -latomic"
+	$(MAKE) -C $(PKG_BUILD_DIR)/wemo_client \
+		CC="$(TARGET_CC)" \
+		CFLAGS="$(TARGET_CFLAGS) -include $(PKG_BUILD_DIR)/atomic_compat.h" \
+		LDFLAGS="$(TARGET_LDFLAGS) -pthread" \
+		RPATH_FLAGS= \
+		INCLUDES="-I../wemo_engine -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/upnp" \
+		LIBS="../wemo_engine/libwemoengine.a -lupnp -lixml -lsqlite3 $(STAGING_DIR)/usr/lib/libcrypto.a -latomic -lz"
 endef
 
 define Package/openwemo-bridge-core/install
 	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/lib $(1)/etc/init.d $(1)/etc
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wemo_ctrl/wemo_ctrl $(1)/usr/sbin/wemo_ctrl
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wemo_client/wemo_client $(1)/usr/sbin/wemo_client
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wemo_engine/libwemoengine.so $(1)/usr/lib/libwemoengine.so
 	$(INSTALL_BIN) ./files/wemo_ctrl.init $(1)/etc/init.d/wemo_ctrl
 	$(INSTALL_CONF) ./files/wemo_ctrl.conf $(1)/etc/wemo_ctrl.conf
