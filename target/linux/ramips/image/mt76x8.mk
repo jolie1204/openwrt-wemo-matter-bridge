@@ -62,7 +62,7 @@ endef
 TARGET_DEVICES += belkin_wemo
 
 define Device/wemo-matter-bridge
-  IMAGE_SIZE := 8000k
+  IMAGE_SIZE := 10048k
   KERNEL_SIZE := 2048k
   DEVICE_VENDOR := Belkin
   DEVICE_MODEL := Wemo Matter Bridge
