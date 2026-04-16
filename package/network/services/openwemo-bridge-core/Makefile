@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openwemo-bridge-core
 PKG_VERSION:=0.1
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_LICENSE:=BSD-3-Clause
 PKG_BUILD_PARALLEL:=1
@@ -16,7 +16,7 @@ define Package/openwemo-bridge-core
   CATEGORY:=Network
   TITLE:=OpenWeMo control daemon and engine
   URL:=https://github.com/jolie1204/openwemo-bridge-core
-  DEPENDS:=+libatomic +libpthread +libsqlite3 +libupnp
+  DEPENDS:=+libatomic +libpthread +libsqlite3 +libupnp +wemo-mtd-data
 endef
 
 define Package/openwemo-bridge-core/description
@@ -26,7 +26,7 @@ endef
 
 define Package/openwemo-bridge-core/conffiles
 /etc/wemo_ctrl.conf
-/etc/wemo-matter/
+/data/wemo-matter/
 endef
 
 define Build/Prepare

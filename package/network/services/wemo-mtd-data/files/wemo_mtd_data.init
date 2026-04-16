@@ -1,0 +1,69 @@
+#!/bin/sh /etc/rc.common
+
+START=12
+
+MTD_NAME=data
+MOUNT_POINT=/data
+STATE_DIR="$MOUNT_POINT/wemo-matter"
+CHIP_DIR="$STATE_DIR/chip"
+LEGACY_DIR=/etc/wemo-matter
+
+find_mtd_index()
+{
+	awk -F: -v name="\"$MTD_NAME\"" '
+		$2 ~ name {
+			sub(/^mtd/, "", $1)
+			print $1
+			exit
+		}
+	' /proc/mtd
+}
+
+is_data_mounted()
+{
+	grep -qs " $MOUNT_POINT " /proc/mounts
+}
+
+prepare_dirs()
+{
+	mkdir -p "$CHIP_DIR"
+	chmod 0700 "$STATE_DIR" "$CHIP_DIR"
+}
+
+migrate_legacy_state()
+{
+	[ -L "$LEGACY_DIR" ] && return 0
+
+	if [ -d "$LEGACY_DIR" ]; then
+		mkdir -p "$STATE_DIR"
+		if [ -z "$(ls -A "$STATE_DIR" 2>/dev/null)" ]; then
+			cp -a "$LEGACY_DIR"/. "$STATE_DIR"/ || return 1
+		fi
+		rm -rf "$LEGACY_DIR" || return 1
+	fi
+
+	[ -e "$LEGACY_DIR" ] || ln -s "$STATE_DIR" "$LEGACY_DIR"
+}
+
+start()
+{
+	local mtd_index
+
+	mkdir -p "$MOUNT_POINT"
+
+	if ! is_data_mounted; then
+		mtd_index="$(find_mtd_index)"
+		if [ -z "$mtd_index" ]; then
+			echo "MTD partition '$MTD_NAME' not found; skipping $MOUNT_POINT mount"
+			return 0
+		fi
+
+		mount -t jffs2 -o rw,noatime "/dev/mtdblock$mtd_index" "$MOUNT_POINT" || {
+			echo "failed to mount /dev/mtdblock$mtd_index at $MOUNT_POINT"
+			return 1
+		}
+	fi
+
+	migrate_legacy_state || return 1
+	prepare_dirs
+}

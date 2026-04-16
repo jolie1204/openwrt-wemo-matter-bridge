@@ -5,7 +5,7 @@ assert(chip_build_tools)
 
 wemo_chip_state_dir = getenv("WEMO_CHIP_STATE_DIR")
 if (wemo_chip_state_dir == "") {
-  wemo_chip_state_dir = "/etc/wemo-matter/chip"
+  wemo_chip_state_dir = "/data/wemo-matter/chip"
 }
 
 openwemo_engine_include_dir = getenv("OPENWEMO_ENGINE_INCLUDE_DIR")

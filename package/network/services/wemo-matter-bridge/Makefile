@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wemo-matter-bridge
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE_URL:=https://github.com/jolie1204/connectedhomeip.git
 PKG_SOURCE_PROTO:=git
@@ -32,7 +32,7 @@ define Package/wemo-matter-bridge
   SUBMENU:=Matter
   TITLE:=WeMo Matter bridge
   URL:=https://github.com/jolie1204/wemo-matter-bridge
-  DEPENDS:=+libstdcpp +libatomic +libpthread +libmbedtls +libsqlite3 +libupnp +openwemo-bridge-core
+  DEPENDS:=+libstdcpp +libatomic +libpthread +libmbedtls +libsqlite3 +libupnp +openwemo-bridge-core +wemo-mtd-data
 endef
 
 define Package/wemo-matter-bridge/description
@@ -41,7 +41,7 @@ endpoints.
 endef
 
 define Package/wemo-matter-bridge/conffiles
-/etc/wemo-matter/
+/data/wemo-matter/
 endef
 
 CONFIGURE_OPTIONS:= \
@@ -55,10 +55,10 @@ CONFIGURE_OPTIONS:= \
 	--enable-external-mbedtls
 
 TARGET_CFLAGS += \
-	-DCHIP_CONFIG_KVS_PATH=\"/etc/wemo-matter/chip/chip_kvs\" \
-	-DFATCONFDIR=\"/etc/wemo-matter/chip\" \
-	-DSYSCONFDIR=\"/etc/wemo-matter/chip\" \
-	-DLOCALSTATEDIR=\"/etc/wemo-matter/chip\" \
+	-DCHIP_CONFIG_KVS_PATH=\"/data/wemo-matter/chip/chip_kvs\" \
+	-DFATCONFDIR=\"/data/wemo-matter/chip\" \
+	-DSYSCONFDIR=\"/data/wemo-matter/chip\" \
+	-DLOCALSTATEDIR=\"/data/wemo-matter/chip\" \
 	-DCHIP_DEVICE_CONFIG_DEVICE_TYPE=0x000E \
 	-DCHIP_DEVICE_CONFIG_DEVICE_VENDOR_NAME=\"Wemo\" \
 	-DCHIP_DEVICE_CONFIG_DEVICE_PRODUCT_NAME=\"Matter_Bridge\" \
@@ -96,7 +96,7 @@ define Build/Configure
 	mkdir -p $(OUT_DIR) && cd $(OUT_DIR) && \
 		OPENWEMO_ENGINE_INCLUDE_DIR="$(STAGING_DIR)/usr/include/openwemo" \
 		OPENWEMO_ENGINE_LIB_DIR="$(STAGING_DIR)/usr/lib" \
-		WEMO_CHIP_STATE_DIR="/etc/wemo-matter/chip" \
+		WEMO_CHIP_STATE_DIR="/data/wemo-matter/chip" \
 		$(CONFIGURE_VARS) $(PKG_BUILD_DIR)/scripts/configure \
 			--build-env-dir="$(CHIP_BUILD_ENV_DIR)" \
 			--project=examples/wemo-bridge-app/linux \
