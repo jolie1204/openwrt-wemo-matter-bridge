@@ -53,6 +53,7 @@ define Package/uboot-envtools
 	SECTION:=utils
 	CATEGORY:=Utilities
 	SUBMENU:=Boot Loaders
+	DEFAULT:=y if TARGET_ramips_mt76x8_DEVICE_wemo-matter-bridge||TARGET_ramips_mt76x8_DEVICE_wemo-matter-bridge-8m
 	PKGFLAGS+=nonshared
 	TITLE:=read/modify U-Boot bootloader environment
 endef

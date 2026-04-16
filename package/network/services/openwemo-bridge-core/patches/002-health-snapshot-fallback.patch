@@ -1,0 +1,161 @@
+diff --git a/wemo_ctrl/wemo_ipc_server.c b/wemo_ctrl/wemo_ipc_server.c
+index 64f4b25..988677a 100644
+--- a/wemo_ctrl/wemo_ipc_server.c
++++ b/wemo_ctrl/wemo_ipc_server.c
+@@ -79,6 +79,7 @@ static void proto_route_purge_sockfd(int sockfd);
+ static int wemo_ipc_send(struct we_ipc_hdr *ipchdr, char *ipc_data);
+ static int wemo_ipc_send_to_sock(int sockfd, struct we_ipc_hdr *ipchdr, char *ipc_data);
+ static int wemo_ipc_send_internal(int target_sockfd, struct we_ipc_hdr *ipchdr, char *ipc_data);
++static int wemo_ctrl_list_devices(struct we_device_list *out);
+ 
+ typedef struct broker_cmd_node {
+     int cmd;
+@@ -339,6 +340,41 @@ static void wemo_build_audit_db_path(char *out, size_t out_len)
+     snprintf(out, out_len, "/tmp/wemo_txn_audit.db");
+ }
+ 
++static int wemo_ctrl_fill_health_snapshot_from_devices(int wemo_id, int max_items,
++                                                       struct we_health_snapshot *out)
++{
++    struct we_device_list dev_list;
++    int rc;
++    int i;
++    int count = 0;
++
++    if (out == NULL) {
++        return WE_STATUS_INVALID;
++    }
++
++    rc = wemo_ctrl_list_devices(&dev_list);
++    if (rc != WE_STATUS_OK) {
++        return rc;
++    }
++
++    memset(out, 0, sizeof(*out));
++    for (i = 0; i < dev_list.count && count < max_items; i++) {
++        if (wemo_id > 0 && dev_list.items[i].wemo_id != wemo_id) {
++            continue;
++        }
++
++        out->items[count].wemo_id = dev_list.items[i].wemo_id;
++        count++;
++
++        if (wemo_id > 0) {
++            break;
++        }
++    }
++
++    out->count = count;
++    return WE_STATUS_OK;
++}
++
+ static int wemo_ctrl_get_health_snapshot(int wemo_id, int max_items, struct we_health_snapshot *out)
+ {
+     sqlite3 *db = NULL;
+@@ -370,13 +406,13 @@ static int wemo_ctrl_get_health_snapshot(int wemo_id, int max_items, struct we_h
+         if (db != NULL) {
+             sqlite3_close(db);
+         }
+-        return WE_STATUS_INTERNAL;
++        return wemo_ctrl_fill_health_snapshot_from_devices(wemo_id, max_items, out);
+     }
+     sqlite3_busy_timeout(db, 2000);
+     rc = sqlite3_prepare_v2(db, (wemo_id > 0) ? sql_one : sql_all, -1, &stmt, NULL);
+     if (rc != SQLITE_OK) {
+         sqlite3_close(db);
+-        return WE_STATUS_INTERNAL;
++        return wemo_ctrl_fill_health_snapshot_from_devices(wemo_id, max_items, out);
+     }
+     if (wemo_id > 0) {
+         sqlite3_bind_int(stmt, 1, wemo_id);
+@@ -404,6 +440,11 @@ static int wemo_ctrl_get_health_snapshot(int wemo_id, int max_items, struct we_h
+     }
+     sqlite3_finalize(stmt);
+     sqlite3_close(db);
++
++    if (count == 0) {
++        return wemo_ctrl_fill_health_snapshot_from_devices(wemo_id, max_items, out);
++    }
++
+     out->count = count;
+     return WE_STATUS_OK;
+ }
+diff --git a/wemo_engine/wemo_engine.c b/wemo_engine/wemo_engine.c
+index c299087..eef81ae 100644
+--- a/wemo_engine/wemo_engine.c
++++ b/wemo_engine/wemo_engine.c
+@@ -1271,6 +1271,10 @@ int we_bridge_preflight_device(int wemo_id, struct we_bridge_preflight_result *o
+         out->ready = 0;
+         return WE_STATUS_OK;
+     }
++    if (health.total_applied == 0 && health.total_timeouts == 0) {
++        out->ready = 1;
++        return WE_STATUS_OK;
++    }
+     if (health.total_applied < 2) {
+         out->ready = 0;
+         return WE_STATUS_OK;
+     }
+     out->ready = 1;
+     return WE_STATUS_OK;
+ }
+diff --git a/wemo_client/wemo_client.c b/wemo_client/wemo_client.c
+index 6f9e800..c161a59 100644
+--- a/wemo_client/wemo_client.c
++++ b/wemo_client/wemo_client.c
+@@ -149,6 +149,37 @@ static void set_default_db_paths(void)
+     }
+ }
+ 
++static void sync_runtime_db_env(void)
++{
++    char audit_db[PATH_MAX];
++    char *slash;
++
++    if (wemo_state_db[0] == '\0') {
++        return;
++    }
++
++    setenv("WEMO_STATE_DB_PATH", wemo_state_db, 1);
++
++    if (snprintf(audit_db, sizeof(audit_db), "%s", wemo_state_db) >= (int)sizeof(audit_db)) {
++        return;
++    }
++
++    slash = strrchr(audit_db, '/');
++    if (slash == NULL) {
++        return;
++    }
++
++    if (snprintf(slash + 1,
++                 sizeof(audit_db) - (size_t)(slash + 1 - audit_db),
++                 "%s",
++                 "wemo_txn_audit.db") >=
++        (int)(sizeof(audit_db) - (size_t)(slash + 1 - audit_db))) {
++        return;
++    }
++
++    setenv("WEMO_AUDIT_DB_PATH", audit_db, 1);
++}
++
+ static int get_serial_number(char *value, size_t value_len)
+ {
+     const char *env = getenv("WEMO_SERIAL_NUMBER");
+@@ -1395,6 +1426,9 @@ int process_config()
+                     }
+                 }
+             }
++            else if (!strcasecmp("ipc_bind", key)) {
++                continue;
++            }
+             else {
+                 if (!client_quiet_all) {
+                     printf("unknown item %s\n", key);
+@@ -1439,6 +1473,7 @@ int main()
+             printf("/etc/wemo_ctrl.conf not found using default DB paths\n");
+         }
+     }
++    sync_runtime_db_env();
+     if (!ifname_set) {
+         char selected[IFNAMSIZ] = {0};
+         if (choose_preferred_ifname(selected, sizeof(selected)) == 0) {
