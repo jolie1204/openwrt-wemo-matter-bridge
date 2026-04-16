@@ -69,7 +69,8 @@ define Device/wemo-matter-bridge
   DEVICE_VARIANT := 16M
   DEVICE_PACKAGES := -hostapd-common -iw -kmod-cfg80211 -kmod-mac80211 \
 	-kmod-mt7603 -kmod-mt76x2 -wifi-scripts -wireless-regdb \
-	-wpad-basic-mbedtls wemo-mtd-data
+	-wpad-basic-mbedtls libsqlite3 libstdcpp libupnp \
+	openwemo-bridge-core wemo-mtd-data wemo-matter-bridge
   SUPPORTED_DEVICES += belkin,wemo-matter-bridge
   SUPPORTED_DEVICES += wemo-matter-bridge
   SUPPORTED_DEVICES += mt7628
