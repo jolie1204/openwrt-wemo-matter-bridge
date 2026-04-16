@@ -1,0 +1,3 @@
+declare_args() {
+  jsoncpp_root = "//connectedhomeip/third_party/jsoncpp"
+}

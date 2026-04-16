@@ -1,0 +1,88 @@
+import("//build_overrides/chip.gni")
+import("${chip_root}/build/chip/tools.gni")
+
+assert(chip_build_tools)
+
+wemo_chip_state_dir = getenv("WEMO_CHIP_STATE_DIR")
+if (wemo_chip_state_dir == "") {
+  wemo_chip_state_dir = "/etc/wemo-matter/chip"
+}
+
+openwemo_engine_include_dir = getenv("OPENWEMO_ENGINE_INCLUDE_DIR")
+openwemo_engine_lib_dir = getenv("OPENWEMO_ENGINE_LIB_DIR")
+
+assert(openwemo_engine_include_dir != "")
+assert(openwemo_engine_lib_dir != "")
+
+executable("wemo-bridge-app") {
+  sources = [
+    "${chip_root}/examples/bridge-app/bridge-common/include/CHIPProjectAppConfig.h",
+    "${chip_root}/examples/bridge-app/linux/Device.cpp",
+    "${chip_root}/examples/bridge-app/linux/bridged-actions-stub.cpp",
+    "${chip_root}/examples/bridge-app/linux/include/Device.h",
+    "${chip_root}/examples/bridge-app/linux/include/main.h",
+    "../src/adapters/wemo/wemo_adapter_openwemo.cpp",
+    "../src/matter/endpoint_registry.cpp",
+    "DeviceDimmable.cpp",
+    "include/CHIPProjectAppConfig.h",
+    "include/DeviceDimmable.h",
+    "main.cpp",
+  ]
+
+  deps = [
+    "${chip_root}/examples/bridge-app/bridge-common",
+    "${chip_root}/examples/platform/linux:app-main",
+    "${chip_root}/src/app/clusters/identify-server:identify-server",
+    "${chip_root}/src/lib",
+  ]
+
+  cflags = [
+    "-Wconversion",
+    "-Wno-shadow",
+    "-Wno-format-nonliteral",
+  ]
+
+  cflags_cc = [
+    "-Wno-format-nonliteral",
+  ]
+
+  defines = [
+    "HAVE_OPENWEMO_ENGINE=1",
+    "CHIP_DEVICE_CONFIG_DEVICE_TYPE=0x000E",
+    "FATCONFDIR=\"" + wemo_chip_state_dir + "\"",
+    "SYSCONFDIR=\"" + wemo_chip_state_dir + "\"",
+    "LOCALSTATEDIR=\"" + wemo_chip_state_dir + "\"",
+    "CHIP_CONFIG_KVS_PATH=\"" + wemo_chip_state_dir + "/chip_kvs\"",
+  ]
+
+  include_dirs = [
+    "${chip_root}/examples/bridge-app/linux/include",
+    "../include",
+    "include",
+    openwemo_engine_include_dir,
+  ]
+
+  lib_dirs = [ openwemo_engine_lib_dir ]
+
+  libs = [
+    "wemoengine",
+    "mbedcrypto",
+    "mbedtls",
+    "mbedx509",
+    "sqlite3",
+    "ixml",
+    "upnp",
+    "pthread",
+    "atomic",
+  ]
+
+  output_dir = root_out_dir
+}
+
+group("default") {
+  deps = [ ":linux" ]
+}
+
+group("linux") {
+  deps = [ ":wemo-bridge-app" ]
+}

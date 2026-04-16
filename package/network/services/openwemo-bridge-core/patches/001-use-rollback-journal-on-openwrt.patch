@@ -1,0 +1,14 @@
+--- a/wemo_ctrl/db_utils.c
++++ b/wemo_ctrl/db_utils.c
+@@ -25,9 +25,9 @@ static void ApplyDBPragmas(sqlite3 *db)
+     char *err = NULL;
+     int rc;
+ 
+-    rc = sqlite3_exec(db, "PRAGMA journal_mode=WAL;", NULL, NULL, &err);
++    rc = sqlite3_exec(db, "PRAGMA journal_mode=DELETE;", NULL, NULL, &err);
+     if (rc != SQLITE_OK) {
+-        LOG_WARN_MSG("failed setting journal_mode=WAL: %s", err ? err : "unknown error");
++        LOG_WARN_MSG("failed setting journal_mode=DELETE: %s", err ? err : "unknown error");
+         if (err != NULL) {
+             sqlite3_free(err);
+         }
