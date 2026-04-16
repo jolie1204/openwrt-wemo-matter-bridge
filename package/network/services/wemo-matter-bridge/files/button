@@ -1,0 +1,20 @@
+#!/bin/sh
+
+INDICATOR=/usr/libexec/wemo-indicator
+HOLD_SECS=8
+
+case "$ACTION" in
+pressed)
+	return "$HOLD_SECS"
+	;;
+timeout)
+	"$INDICATOR" button-long >/dev/null 2>&1
+	;;
+released)
+	if [ "${SEEN:-0}" -lt 2 ]; then
+		"$INDICATOR" button-short >/dev/null 2>&1 &
+	fi
+	;;
+esac
+
+return 0

@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wemo-matter-bridge
-PKG_RELEASE:=3
+PKG_RELEASE:=5
 
 PKG_SOURCE_URL:=https://github.com/jolie1204/connectedhomeip.git
 PKG_SOURCE_PROTO:=git
@@ -109,9 +109,12 @@ define Build/Compile
 endef
 
 define Package/wemo-matter-bridge/install
-	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc/init.d
+	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/libexec $(1)/etc/init.d $(1)/etc/rc.button
 	$(INSTALL_BIN) $(OUT_DIR)/wemo-bridge-app $(1)/usr/sbin/wemo-bridge-app
 	$(INSTALL_BIN) ./files/wemo-matter-bridge.init $(1)/etc/init.d/wemo-matter-bridge
+	$(INSTALL_BIN) ./files/wemo-indicator $(1)/usr/libexec/wemo-indicator
+	$(INSTALL_BIN) ./files/wemo-indicator.init $(1)/etc/init.d/wemo-indicator
+	$(INSTALL_BIN) ./files/button $(1)/etc/rc.button/button
 endef
 
 $(eval $(call BuildPackage,wemo-matter-bridge))

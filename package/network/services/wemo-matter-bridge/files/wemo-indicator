@@ -1,0 +1,249 @@
+#!/bin/sh
+
+LED_ROOT=/sys/class/leds
+WHITE_LED=white
+AMBER_LED=amber
+PAUSE_FILE=/tmp/wemo-led-pause-until
+ACTION_FILE=/tmp/wemo-led-action
+CHIP_KVS=/data/wemo-matter/chip/chip_kvs
+IFACE=br-lan
+NETWORK=lan
+BOOT_GRACE_SECS=120
+
+led_path()
+{
+	echo "$LED_ROOT/$1/$2"
+}
+
+led_max()
+{
+	cat "$(led_path "$1" max_brightness)" 2>/dev/null || echo 1
+}
+
+led_set_attr()
+{
+	local led="$1"
+	local attr="$2"
+	local value="$3"
+	local path
+
+	path="$(led_path "$led" "$attr")"
+	[ -e "$path" ] || return 1
+	printf '%s' "$value" > "$path"
+}
+
+led_off()
+{
+	led_set_attr "$1" trigger none
+	led_set_attr "$1" brightness 0
+}
+
+led_on()
+{
+	led_set_attr "$1" trigger none
+	led_set_attr "$1" brightness "$(led_max "$1")"
+}
+
+led_timer()
+{
+	local led="$1"
+	local delay_on="$2"
+	local delay_off="$3"
+
+	led_set_attr "$led" trigger timer
+	led_set_attr "$led" delay_on "$delay_on"
+	led_set_attr "$led" delay_off "$delay_off"
+}
+
+set_state()
+{
+	case "$1" in
+	healthy)
+		led_off "$AMBER_LED"
+		led_on "$WHITE_LED"
+		;;
+	booting)
+		led_off "$AMBER_LED"
+		led_timer "$WHITE_LED" 1000 1000
+		;;
+	uncommissioned)
+		led_off "$WHITE_LED"
+		led_timer "$AMBER_LED" 1000 1000
+		;;
+	action)
+		led_off "$WHITE_LED"
+		led_timer "$AMBER_LED" 150 150
+		;;
+	*)
+		led_off "$WHITE_LED"
+		led_timer "$AMBER_LED" 100 100
+		;;
+	esac
+}
+
+pause_until()
+{
+	echo "$(($1 + $(date +%s)))" > "$PAUSE_FILE"
+}
+
+pause_active()
+{
+	local now expiry
+
+	[ -f "$PAUSE_FILE" ] || return 1
+	now="$(date +%s)"
+	expiry="$(cat "$PAUSE_FILE" 2>/dev/null || echo 0)"
+	[ "$expiry" -gt "$now" ] && return 0
+
+	rm -f "$PAUSE_FILE"
+	return 1
+}
+
+is_data_mounted()
+{
+	grep -qs " /data " /proc/mounts
+}
+
+network_ready()
+{
+	ubus call "network.interface.$NETWORK" status 2>/dev/null | grep -q '"up": true' || return 1
+	ip -4 addr show dev "$IFACE" 2>/dev/null | grep -q 'inet ' || return 1
+}
+
+services_ready()
+{
+	pidof wemo_ctrl >/dev/null 2>&1 || return 1
+	pidof wemo-bridge-app >/dev/null 2>&1 || return 1
+}
+
+uptime_secs()
+{
+	cut -d. -f1 /proc/uptime
+}
+
+detect_state()
+{
+	local uptime
+
+	[ -f "$ACTION_FILE" ] && {
+		echo action
+		return 0
+	}
+
+	is_data_mounted || {
+		echo fault
+		return 0
+	}
+
+	network_ready || {
+		echo booting
+		return 0
+	}
+
+	services_ready && {
+		if [ -s "$CHIP_KVS" ]; then
+			echo healthy
+		else
+			echo uncommissioned
+		fi
+		return 0
+	}
+
+	uptime="$(uptime_secs)"
+	if [ "$uptime" -lt "$BOOT_GRACE_SECS" ]; then
+		echo booting
+	else
+		echo fault
+	fi
+}
+
+status_pulse()
+{
+	local led="$1"
+	local count="${2:-3}"
+	local duration=1
+
+	[ "$count" -gt 3 ] && duration=2
+	pause_until $((duration + 2))
+	if [ "$led" = "$WHITE_LED" ]; then
+		led_off "$AMBER_LED"
+	else
+		led_off "$WHITE_LED"
+	fi
+	led_timer "$led" 150 150
+	sleep "$duration"
+	led_off "$led"
+	rm -f "$PAUSE_FILE"
+	set_state "$(detect_state)"
+}
+
+button_short()
+{
+	case "$(detect_state)" in
+	healthy|booting)
+		status_pulse "$WHITE_LED"
+		;;
+	*)
+		status_pulse "$AMBER_LED"
+		;;
+	esac
+}
+
+button_long()
+{
+	(
+		touch "$ACTION_FILE"
+		pause_until 20
+		set_state action
+		logger -t wemo-indicator "button hold: restarting bridge services"
+		/etc/init.d/wemo-matter-bridge stop >/dev/null 2>&1 || true
+		/etc/init.d/wemo_ctrl restart >/dev/null 2>&1 || true
+		/etc/init.d/wemo-matter-bridge restart >/dev/null 2>&1 || true
+		rm -f "$ACTION_FILE" "$PAUSE_FILE"
+	) &
+}
+
+monitor()
+{
+	local current_state="" next_state paused=0
+
+	while true; do
+		if pause_active; then
+			paused=1
+			sleep 1
+			continue
+		fi
+
+		if [ "$paused" -eq 1 ]; then
+			current_state=""
+			paused=0
+		fi
+
+		next_state="$(detect_state)"
+		if [ "$next_state" != "$current_state" ]; then
+			set_state "$next_state"
+			current_state="$next_state"
+		fi
+
+		sleep 2
+	done
+}
+
+case "$1" in
+monitor)
+	monitor
+	;;
+button-short)
+	button_short
+	;;
+button-long)
+	button_long
+	;;
+state)
+	detect_state
+	;;
+*)
+	echo "Usage: $0 {monitor|button-short|button-long|state}" >&2
+	exit 1
+	;;
+esac
