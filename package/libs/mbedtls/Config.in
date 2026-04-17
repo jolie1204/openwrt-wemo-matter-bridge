@@ -18,6 +18,7 @@ config MBEDTLS_CAMELLIA_C
 
 config MBEDTLS_CCM_C
 	bool "MBEDTLS_CCM_C"
+	default y if PACKAGE_wemo-matter-bridge
 	default n
 
 config MBEDTLS_CMAC_C

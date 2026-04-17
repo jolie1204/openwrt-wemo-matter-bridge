@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wemo-matter-bridge
-PKG_RELEASE:=6
+PKG_RELEASE:=7
 
 PKG_SOURCE_URL:=https://github.com/jolie1204/connectedhomeip.git
 PKG_SOURCE_PROTO:=git
@@ -65,7 +65,7 @@ TARGET_CFLAGS += \
 	-Wno-format-nonliteral
 
 TARGET_CXXFLAGS += -Wno-format-nonliteral
-TARGET_LDFLAGS += -lmbedcrypto -lmbedx509
+TARGET_LDFLAGS += -lmbedtls -lmbedcrypto -lmbedx509
 
 CHIP_BUILD_ENV_DIR:=$(STAGING_DIR_HOST)/share/matter-build-env
 OUT_DIR:=$(PKG_BUILD_DIR)/out/openwrt
