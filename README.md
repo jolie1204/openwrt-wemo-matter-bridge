@@ -121,7 +121,9 @@ Current bridge LED/button behavior is intentionally conservative:
 - short button press: status pulse
 - hold button for 8 seconds: restart `wemo_ctrl` and `wemo-matter-bridge`
 
-There is no destructive reset action bound to the front button.
+There is no destructive reset action bound to the front button. These front
+panel mappings are specific to the Belkin MT7628 bridge hardware; Raspberry Pi
+profiles do not provide the same LED/button layout.
 
 ## Local source dependencies
 
@@ -172,25 +174,22 @@ Useful companion files:
 - `openwrt-ramips-mt76x8-wemo-matter-bridge.manifest`
 - `sha256sums`
 
-## Building for Raspberry Pi 4
+## Building for Raspberry Pi 4 and 5
 
-This tree can also be used to build an OpenWrt image for Raspberry Pi 4 with
-the Wemo bridge packages selected manually. There is no dedicated Pi-specific
-bridge profile in this repository today, so the package selection is done in
-`make menuconfig`.
+This tree also includes dedicated Raspberry Pi appliance profiles so the Wemo
+bridge package set is selected by the target profile instead of by ad hoc local
+`.config` edits.
 
-In `make menuconfig`, choose:
+In `make menuconfig`, choose one of these profile flows:
 
-- Target System: `Broadcom BCM27xx`
-- Subtarget: `BCM2711 boards (64 bit)`
-- Target Profile: `Raspberry Pi 4B/400/CM4 (64bit)`
-
-Then enable these packages:
-
-- `Network` -> `openwemo-bridge-core`
-- `Network` -> `wemo-mtd-data`
-- `Network` -> `Matter` -> `wemo-matter-bridge`
-- optional: `Network` -> `wireguard-tools`
+- Raspberry Pi 4
+  - Target System: `Broadcom BCM27xx`
+  - Subtarget: `BCM2711 boards (64 bit)`
+  - Target Profile: `Raspberry Pi 4B/400/CM4 (64bit, Wemo Matter Bridge)`
+- Raspberry Pi 5
+  - Target System: `Broadcom BCM27xx`
+  - Subtarget: `BCM2712 boards (64 bit)`
+  - Target Profile: `Raspberry Pi 5/500/CM5 (Wemo Matter Bridge)`
 
 Example flow:
 
@@ -201,26 +200,35 @@ make menuconfig
 make -j"$(nproc)"
 ```
 
-The Pi 4 image artifacts are written under:
+The Pi image artifacts are written under:
 
 ```text
 bin/targets/bcm27xx/bcm2711/
+bin/targets/bcm27xx/bcm2712/
 ```
 
 Typical output files include:
 
-- `openwrt-bcm27xx-bcm2711-rpi-4-squashfs-factory.img.gz`
-- `openwrt-bcm27xx-bcm2711-rpi-4-squashfs-sysupgrade.img.gz`
+- Pi 4
+  - `openwrt-bcm27xx-bcm2711-rpi-4-wemo-matter-bridge-squashfs-factory.img.gz`
+  - `openwrt-bcm27xx-bcm2711-rpi-4-wemo-matter-bridge-squashfs-sysupgrade.img.gz`
+- Pi 5
+  - `openwrt-bcm27xx-bcm2712-rpi-5-wemo-matter-bridge-squashfs-factory.img.gz`
+  - `openwrt-bcm27xx-bcm2712-rpi-5-wemo-matter-bridge-squashfs-sysupgrade.img.gz`
 
-Notes for Raspberry Pi 4:
+Pi runtime notes:
 
-- OpenWrt on Pi 4 uses `eth0` as `lan` by default.
-- The bridge service now resolves the actual `lan` device dynamically, so it is
-  not tied to `br-lan`.
+- OpenWrt on Raspberry Pi uses `eth0` as `lan` by default.
+- The bridge services and indicator now resolve the actual `lan` device
+  dynamically, so they are not tied to `br-lan`.
 - On targets without the Wemo-specific MTD `data` partition, `wemo-mtd-data`
   falls back to a normal writable `/data` directory instead of requiring JFFS2.
-- If you want the Pi to behave like the MT7628 appliance on a normal home
-  network, change `lan` to DHCP client after first boot:
+- Bridge state still lives under `/data/wemo-matter`. On Raspberry Pi, that
+  path is backed by the normal writable filesystem unless you mount a separate
+  disk or partition at `/data`.
+
+If you want the Pi to behave like the MT7628 appliance on a normal upstream
+network, change `lan` to DHCP client after first boot:
 
 ```sh
 uci set network.lan.proto='dhcp'
@@ -228,9 +236,26 @@ uci commit network
 service network restart
 ```
 
-- Bridge state will live under `/data/wemo-matter`. On Raspberry Pi, that path
-  will be backed by the normal writable filesystem unless you mount a separate
-  disk or partition at `/data`.
+## Raspberry Pi operator checks
+
+After first boot, these checks are enough to prove the appliance path is up:
+
+```sh
+ubus call system board
+ubus call network.interface.lan status
+test -d /data/wemo-matter/chip && ls -ld /data /data/wemo-matter /data/wemo-matter/chip
+pidof wemo_ctrl
+pidof wemo-bridge-app
+logread | grep -E 'wemo_mtd_data|Fabric index|Server Listening'
+printf 'listdev\nexit\n' | /usr/sbin/wemo_client
+printf 'preflightall\nexit\n' | /usr/sbin/wemo_client
+```
+
+If WireGuard is configured on the Pi, also check:
+
+```sh
+wg show
+```
 
 ## Flashing and upgrades
 

@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wemo-matter-bridge
-PKG_RELEASE:=7
+PKG_RELEASE:=8
 
 PKG_SOURCE_URL:=https://github.com/jolie1204/connectedhomeip.git
 PKG_SOURCE_PROTO:=git

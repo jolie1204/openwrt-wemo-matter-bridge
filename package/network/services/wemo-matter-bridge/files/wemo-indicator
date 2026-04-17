@@ -5,8 +5,9 @@ WHITE_LED=white
 AMBER_LED=amber
 PAUSE_FILE=/tmp/wemo-led-pause-until
 ACTION_FILE=/tmp/wemo-led-action
-CHIP_KVS=/data/wemo-matter/chip/chip_kvs
-IFACE=br-lan
+CHIP_DIR=/data/wemo-matter/chip
+CHIP_KVS=$CHIP_DIR/chip_kvs
+DEFAULT_IFACE=br-lan
 NETWORK=lan
 BOOT_GRACE_SECS=120
 
@@ -99,15 +100,29 @@ pause_active()
 	return 1
 }
 
-is_data_mounted()
+is_data_ready()
 {
-	grep -qs " /data " /proc/mounts
+	grep -qs " /data " /proc/mounts && return 0
+	[ -d "$CHIP_DIR" ] && [ -w /data ]
+}
+
+resolve_ifname()
+{
+	local iface
+
+	iface="$(ubus call "network.interface.$NETWORK" status 2>/dev/null | jsonfilter -q -e '@["l3_device"]' 2>/dev/null)"
+	[ -n "$iface" ] || iface="$(ubus call "network.interface.$NETWORK" status 2>/dev/null | jsonfilter -q -e '@["device"]' 2>/dev/null)"
+	[ -n "$iface" ] || iface="$DEFAULT_IFACE"
+	echo "$iface"
 }
 
 network_ready()
 {
+	local iface
+
 	ubus call "network.interface.$NETWORK" status 2>/dev/null | grep -q '"up": true' || return 1
-	ip -4 addr show dev "$IFACE" 2>/dev/null | grep -q 'inet ' || return 1
+	iface="$(resolve_ifname)"
+	ip -4 addr show dev "$iface" 2>/dev/null | grep -q 'inet ' || return 1
 }
 
 services_ready()
@@ -130,7 +145,7 @@ detect_state()
 		return 0
 	}
 
-	is_data_mounted || {
+	is_data_ready || {
 		echo fault
 		return 0
 	}

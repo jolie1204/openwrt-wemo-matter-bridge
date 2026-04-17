@@ -60,6 +60,12 @@ define Build/sdcard-img
 		$(CONFIG_TARGET_KERNEL_PARTSIZE) $(CONFIG_TARGET_ROOTFS_PARTSIZE)
 endef
 
+WEMO_MATTER_BRIDGE_PI_PACKAGES := \
+	openwemo-bridge-core \
+	wemo-mtd-data \
+	wemo-matter-bridge \
+	wireguard-tools
+
 ### Devices ###
 define Device/Default
   DEVICE_VENDOR := Raspberry Pi
@@ -198,8 +204,14 @@ define Device/rpi-4
   IMAGE/sysupgrade.img.gz := boot-common | boot-2711 | sdcard-img | gzip | append-metadata
   IMAGE/factory.img.gz := boot-common | boot-2711 | sdcard-img | gzip
 endef
+
+define Device/rpi-4-wemo-matter-bridge
+  $(Device/rpi-4)
+  DEVICE_VARIANT := (64bit, Wemo Matter Bridge)
+  DEVICE_PACKAGES += $(WEMO_MATTER_BRIDGE_PI_PACKAGES)
+endef
 ifeq ($(SUBTARGET),bcm2711)
-  TARGET_DEVICES += rpi-4
+  TARGET_DEVICES += rpi-4 rpi-4-wemo-matter-bridge
 endif
 
 define Device/rpi-5
@@ -230,8 +242,14 @@ define Device/rpi-5
   IMAGE/sysupgrade.img.gz := boot-common | sdcard-img | gzip | append-metadata
   IMAGE/factory.img.gz := boot-common | sdcard-img | gzip
 endef
+
+define Device/rpi-5-wemo-matter-bridge
+  $(Device/rpi-5)
+  DEVICE_VARIANT := (Wemo Matter Bridge)
+  DEVICE_PACKAGES += $(WEMO_MATTER_BRIDGE_PI_PACKAGES)
+endef
 ifeq ($(SUBTARGET),bcm2712)
-  TARGET_DEVICES += rpi-5
+  TARGET_DEVICES += rpi-5 rpi-5-wemo-matter-bridge
 endif
 
 $(eval $(call BuildImage))
