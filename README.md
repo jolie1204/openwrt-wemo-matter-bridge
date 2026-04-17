@@ -172,6 +172,66 @@ Useful companion files:
 - `openwrt-ramips-mt76x8-wemo-matter-bridge.manifest`
 - `sha256sums`
 
+## Building for Raspberry Pi 4
+
+This tree can also be used to build an OpenWrt image for Raspberry Pi 4 with
+the Wemo bridge packages selected manually. There is no dedicated Pi-specific
+bridge profile in this repository today, so the package selection is done in
+`make menuconfig`.
+
+In `make menuconfig`, choose:
+
+- Target System: `Broadcom BCM27xx`
+- Subtarget: `BCM2711 boards (64 bit)`
+- Target Profile: `Raspberry Pi 4B/400/CM4 (64bit)`
+
+Then enable these packages:
+
+- `Network` -> `openwemo-bridge-core`
+- `Network` -> `wemo-mtd-data`
+- `Network` -> `Matter` -> `wemo-matter-bridge`
+- optional: `Network` -> `wireguard-tools`
+
+Example flow:
+
+```bash
+./scripts/feeds update -a
+./scripts/feeds install -a
+make menuconfig
+make -j"$(nproc)"
+```
+
+The Pi 4 image artifacts are written under:
+
+```text
+bin/targets/bcm27xx/bcm2711/
+```
+
+Typical output files include:
+
+- `openwrt-bcm27xx-bcm2711-rpi-4-squashfs-factory.img.gz`
+- `openwrt-bcm27xx-bcm2711-rpi-4-squashfs-sysupgrade.img.gz`
+
+Notes for Raspberry Pi 4:
+
+- OpenWrt on Pi 4 uses `eth0` as `lan` by default.
+- The bridge service now resolves the actual `lan` device dynamically, so it is
+  not tied to `br-lan`.
+- On targets without the Wemo-specific MTD `data` partition, `wemo-mtd-data`
+  falls back to a normal writable `/data` directory instead of requiring JFFS2.
+- If you want the Pi to behave like the MT7628 appliance on a normal home
+  network, change `lan` to DHCP client after first boot:
+
+```sh
+uci set network.lan.proto='dhcp'
+uci commit network
+service network restart
+```
+
+- Bridge state will live under `/data/wemo-matter`. On Raspberry Pi, that path
+  will be backed by the normal writable filesystem unless you mount a separate
+  disk or partition at `/data`.
+
 ## Flashing and upgrades
 
 The bridge is intended to be updated with `sysupgrade`.

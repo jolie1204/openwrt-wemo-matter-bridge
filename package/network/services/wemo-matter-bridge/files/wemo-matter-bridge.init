@@ -5,20 +5,31 @@ USE_PROCD=1
 
 STATE_DIR=/data/wemo-matter
 CHIP_DIR=/data/wemo-matter/chip
-IFACE=br-lan
 NETWORK=lan
+DEFAULT_IFACE=br-lan
 WAIT_SECS=90
 READY_SETTLE_SECS=2
 
-is_data_mounted()
+resolve_ifname()
 {
-	grep -qs " /data " /proc/mounts
+	local ifname
+
+	ifname="$(ubus call "network.interface.$NETWORK" status 2>/dev/null | \
+		jsonfilter -q -e '@["l3_device"]')"
+	[ -n "$ifname" ] || ifname="$(ubus call "network.interface.$NETWORK" status 2>/dev/null | \
+		jsonfilter -q -e '@["device"]')"
+	[ -n "$ifname" ] || ifname="$DEFAULT_IFACE"
+
+	echo "$ifname"
 }
 
 network_ready()
 {
+	local ifname
+
+	ifname="$(resolve_ifname)"
 	ubus call "network.interface.$NETWORK" status 2>/dev/null | grep -q '"up": true' || return 1
-	ip -4 addr show dev "$IFACE" 2>/dev/null | grep -q 'inet ' || return 1
+	ip -4 addr show dev "$ifname" 2>/dev/null | grep -q 'inet ' || return 1
 }
 
 wait_for_network()
@@ -34,17 +45,13 @@ wait_for_network()
 		remaining=$((remaining - 1))
 	done
 
-	echo "Wemo network interface '$NETWORK' on '$IFACE' is not ready"
+	echo "Wemo network interface '$NETWORK' is not ready"
 	return 1
 }
 
 prepare_state()
 {
 	/etc/init.d/wemo_mtd_data start || return 1
-	is_data_mounted || {
-		echo "Wemo data partition is not mounted"
-		return 1
-	}
 
 	CHIP_DIR="$STATE_DIR/chip"
 	mkdir -p "$CHIP_DIR"
@@ -61,13 +68,16 @@ prepare_state()
 
 start_service()
 {
+	local ifname
+
 	prepare_state || return 1
 	wait_for_network || return 1
+	ifname="$(resolve_ifname)"
 
 	procd_open_instance
 	procd_set_param command /usr/sbin/wemo-bridge-app \
 		--KVS "$CHIP_DIR/chip_kvs" \
-		--interface-id "$IFACE"
+		--interface-id "$ifname"
 	procd_set_param env WEMO_DEVICE_DB_PATH="$STATE_DIR/wemo_device.db"
 	procd_set_param env WEMO_STATE_DB_PATH="$STATE_DIR/wemo_state.db"
 	procd_set_param stdout 1

@@ -54,14 +54,13 @@ start()
 	if ! is_data_mounted; then
 		mtd_index="$(find_mtd_index)"
 		if [ -z "$mtd_index" ]; then
-			echo "MTD partition '$MTD_NAME' not found; skipping $MOUNT_POINT mount"
-			return 0
+			echo "MTD partition '$MTD_NAME' not found; using writable $MOUNT_POINT"
+		else
+			mount -t jffs2 -o rw,noatime "/dev/mtdblock$mtd_index" "$MOUNT_POINT" || {
+				echo "failed to mount /dev/mtdblock$mtd_index at $MOUNT_POINT"
+				return 1
+			}
 		fi
-
-		mount -t jffs2 -o rw,noatime "/dev/mtdblock$mtd_index" "$MOUNT_POINT" || {
-			echo "failed to mount /dev/mtdblock$mtd_index at $MOUNT_POINT"
-			return 1
-		}
 	fi
 
 	migrate_legacy_state || return 1
