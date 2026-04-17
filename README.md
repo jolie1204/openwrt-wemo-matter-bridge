@@ -1,108 +1,223 @@
-![OpenWrt logo](include/logo.png)
+# OpenWrt for Wemo Matter Bridge
 
-OpenWrt Project is a Linux operating system targeting embedded devices. Instead
-of trying to create a single, static firmware, OpenWrt provides a fully
-writable filesystem with package management. This frees you from the
-application selection and configuration provided by the vendor and allows you
-to customize the device through the use of packages to suit any application.
-For developers, OpenWrt is the framework to build an application without having
-to build a complete firmware around it; for users this means the ability for
-full customization, to use the device in ways never envisioned.
+This repository is a device-focused OpenWrt fork for the Belkin Wemo Bridge
+hardware based on MT7628. Its primary job is to build firmware for a Wemo to
+Matter bridge appliance, not to serve as a generic OpenWrt distribution tree.
 
-Sunshine!
+The tree carries custom board support, bridge packages, persistent state
+handling, and operational defaults needed to replace a host-based Wemo Matter
+bridge with a self-contained OpenWrt image.
 
-## Download
+## Scope
 
-Built firmware images are available for many architectures and come with a
-package selection to be used as WiFi home router. To quickly find a factory
-image usable to migrate from a vendor stock firmware to OpenWrt, try the
-*Firmware Selector*.
+This fork adds Wemo bridge specific behavior on top of upstream OpenWrt:
 
-* [OpenWrt Firmware Selector](https://firmware-selector.openwrt.org/)
+- `wemo-matter-bridge` target profile for the Belkin MT7628 bridge hardware
+- `openwemo-bridge-core` package from local sibling sources
+- `wemo-matter-bridge` package from local sibling sources
+- `wemo-mtd-data` package to mount the `data` MTD partition at `/data`
+- Matter and OpenWeMo state persistence under `/data/wemo-matter`
+- built-in WireGuard tools for remote management
+- built-in `fw_printenv` / `fw_setenv` support for the bridge U-Boot env area
+- LED/button behavior for basic health and service control
 
-If your device is supported, please follow the **Info** link to see install
-instructions or consult the support resources listed below.
+This repo does not try to support the original vendor firmware layout, dual
+boot slots, or Wi-Fi-first router use cases.
 
-## 
+## Supported targets
 
-An advanced user may require additional or specific package. (Toolchain, SDK, ...) For everything else than simple firmware download, try the wiki download page:
+- `wemo-matter-bridge`
+  - default and recommended target
+  - 16 MiB SPI NOR
+  - includes dedicated `data` partition for persistent state
+- `wemo-matter-bridge-8m`
+  - secondary target for confirmed 8 MiB units
+  - more space constrained
 
-* [OpenWrt Wiki Download](https://openwrt.org/downloads)
+The default platform assumption is 16 MiB flash.
 
-## Development
+## Device assumptions
 
-To build your own firmware you need a GNU/Linux, BSD or macOS system (case
-sensitive filesystem required). Cygwin is unsupported because of the lack of a
-case sensitive file system.
+- bootloader uses boot A only
+- kernel must stay at flash offset `0x50000`
+- kernel/rootfs remain separate, with rootfs as `mtd2`
+- no dual partitions, no `kernel_2`, no `rootfs_2`
+- no vendor `vendor_rootfs_data`
+- no usable Wi-Fi antenna; Wi-Fi packages are removed from the bridge profile
+- factory MAC is expected at `factory + 0x28`
 
-### Requirements
+## Flash layout
 
-You need the following tools to compile OpenWrt, the package names vary between
-distributions. A complete list with distribution specific packages is found in
-the [Build System Setup](https://openwrt.org/docs/guide-developer/build-system/install-buildsystem)
-documentation.
+### 16 MiB target
 
+The current 16 MiB layout is:
+
+- `u-boot` at `0x000000`
+- `u-boot-env` at `0x030000`
+- `factory` at `0x040000`
+- `kernel` at `0x050000`, size `0x200000`
+- `rootfs` at `0x250000`, size `0x7d0000`
+- `data` at `0xa20000`, size `0x5d0000`
+- `config` at `0xff0000`
+
+The aggregate `firmware` region is `0x9d0000`.
+
+### 8 MiB target
+
+The 8 MiB target keeps the same bootloader expectations but has a smaller
+firmware region and less room for growth. Use it only when the hardware is
+confirmed to be 8 MiB.
+
+## Runtime layout
+
+The bridge stores runtime state here:
+
+- Matter and OpenWeMo state root: `/data/wemo-matter`
+- CHIP state: `/data/wemo-matter/chip`
+- compatibility symlink: `/etc/wemo-matter -> /data/wemo-matter`
+
+On 16 MiB systems, `wemo-mtd-data` mounts the `data` MTD partition as JFFS2 at
+`/data` during boot, migrates legacy state if needed, and prepares the state
+directories with restrictive permissions.
+
+## Included bridge packages
+
+The `wemo-matter-bridge` image profile currently includes:
+
+- `openwemo-bridge-core`
+- `wemo-matter-bridge`
+- `wemo-mtd-data`
+- `wireguard-tools`
+- `uboot-envtools`
+- `libsqlite3`
+- `libstdcpp`
+- `libupnp`
+
+The installed bridge tooling includes:
+
+- `/usr/sbin/wemo_ctrl`
+- `/usr/sbin/wemo_client`
+- `/usr/sbin/wemo-bridge-app`
+- `/usr/sbin/fw_printenv`
+- `/usr/sbin/fw_setenv`
+
+## Service behavior
+
+Bridge services are wired for the current appliance behavior:
+
+- `br-lan` is used as a DHCP client uplink
+- `wemo_ctrl` and `wemo-matter-bridge` wait for `lan` / `br-lan` readiness
+- Matter bridge state is passed through `/data/wemo-matter`
+- WireGuard can be enabled through normal OpenWrt `network` config
+
+## LED and button behavior
+
+Current bridge LED/button behavior is intentionally conservative:
+
+- white slow blink: booting or waiting for LAN
+- white solid: healthy
+- amber slow blink: uncommissioned or no fabric
+- amber fast blink: fault
+- short button press: status pulse
+- hold button for 8 seconds: restart `wemo_ctrl` and `wemo-matter-bridge`
+
+There is no destructive reset action bound to the front button.
+
+## Local source dependencies
+
+This tree expects sibling source repositories under `../sources`:
+
+- `../sources/openwemo-bridge-core`
+- `../sources/wemo-matter-bridge`
+
+The OpenWrt packages copy sources from those directories during build. If they
+are missing, the package build will fail by design.
+
+## Build quick start
+
+Typical OpenWrt preparation still applies:
+
+```bash
+./scripts/feeds update -a
+./scripts/feeds install -a
 ```
-binutils bzip2 diff find flex gawk gcc-6+ getopt grep install libc-dev libz-dev
-make4.1+ perl python3.7+ rsync subversion unzip which
+
+Then select the bridge target in `make menuconfig`:
+
+- Target System: `MediaTek Ralink MIPS`
+- Subtarget: `MT76x8`
+- Target Profile: `wemo-matter-bridge` or `wemo-matter-bridge-8m`
+
+Build with:
+
+```bash
+make -j"$(nproc)"
 ```
 
-### Quickstart
+Resulting artifacts are written under:
 
-1. Run `./scripts/feeds update -a` to obtain all the latest package definitions
-   defined in feeds.conf / feeds.conf.default
+```text
+bin/targets/ramips/mt76x8/
+```
 
-2. Run `./scripts/feeds install -a` to install symlinks for all obtained
-   packages into package/feeds/
+The main output for the 16 MiB bridge is typically:
 
-3. Run `make menuconfig` to select your preferred configuration for the
-   toolchain, target system & firmware packages.
+```text
+openwrt-ramips-mt76x8-wemo-matter-bridge-squashfs-sysupgrade.bin
+```
 
-4. Run `make` to build your firmware. This will download all sources, build the
-   cross-compile toolchain and then cross-compile the GNU/Linux kernel & all chosen
-   applications for your target system.
+Useful companion files:
 
-### Related Repositories
+- `openwrt-ramips-mt76x8-wemo-matter-bridge-initramfs-kernel.bin`
+- `openwrt-ramips-mt76x8-wemo-matter-bridge.manifest`
+- `sha256sums`
 
-The main repository uses multiple sub-repositories to manage packages of
-different categories. All packages are installed via the OpenWrt package
-manager called `opkg`. If you're looking to develop the web interface or port
-packages to OpenWrt, please find the fitting repository below.
+## Flashing and upgrades
 
-* [LuCI Web Interface](https://github.com/openwrt/luci): Modern and modular
-  interface to control the device via a web browser.
+The bridge is intended to be updated with `sysupgrade`.
 
-* [OpenWrt Packages](https://github.com/openwrt/packages): Community repository
-  of ported packages.
+Typical workflow:
 
-* [OpenWrt Routing](https://github.com/openwrt/routing): Packages specifically
-  focused on (mesh) routing.
+```bash
+scp bin/targets/ramips/mt76x8/openwrt-ramips-mt76x8-wemo-matter-bridge-squashfs-sysupgrade.bin root@<bridge>:/tmp/
+ssh root@<bridge> sysupgrade /tmp/openwrt-ramips-mt76x8-wemo-matter-bridge-squashfs-sysupgrade.bin
+```
 
-* [OpenWrt Video](https://github.com/openwrt/video): Packages specifically
-  focused on display servers and clients (Xorg and Wayland).
+When preserving configuration, bridge state under `/data/wemo-matter` survives
+reboot as long as the `data` partition layout is unchanged.
 
-## Support Information
+## Remote management
 
-For a list of supported devices see the [OpenWrt Hardware Database](https://openwrt.org/supported_devices)
+The bridge profile includes WireGuard tooling so the device can be managed
+without relying on a stable LAN address.
 
-### Documentation
+Useful checks on a running bridge:
 
-* [Quick Start Guide](https://openwrt.org/docs/guide-quick-start/start)
-* [User Guide](https://openwrt.org/docs/guide-user/start)
-* [Developer Documentation](https://openwrt.org/docs/guide-developer/start)
-* [Technical Reference](https://openwrt.org/docs/techref/start)
+```bash
+ssh root@<bridge> ubus call system board
+ssh root@<bridge> wg show
+ssh root@<bridge> fw_printenv
+ssh root@<bridge> 'printf "listdev\nexit\n" | /usr/sbin/wemo_client'
+```
 
-### Support Community
+## Relationship to upstream OpenWrt
 
-* [Forum](https://forum.openwrt.org): For usage, projects, discussions and hardware advise.
-* [Support Chat](https://webchat.oftc.net/#openwrt): Channel `#openwrt` on **oftc.net**.
+This repository is still an OpenWrt build tree, so normal upstream OpenWrt
+documentation remains relevant for generic build-system topics:
 
-### Developer Community
+- https://openwrt.org/docs/guide-developer/start
+- https://openwrt.org/docs/guide-user/start
 
-* [Bug Reports](https://bugs.openwrt.org): Report bugs in OpenWrt
-* [Dev Mailing List](https://lists.openwrt.org/mailman/listinfo/openwrt-devel): Send patches
-* [Dev Chat](https://webchat.oftc.net/#openwrt-devel): Channel `#openwrt-devel` on **oftc.net**.
+For generic OpenWrt source and history, see upstream:
+
+- https://github.com/openwrt/openwrt
+
+## Related repositories
+
+- `openwemo-bridge-core`: local WeMo discovery/control daemon and client
+- `wemo-matter-bridge`: Matter bridge application sources
 
 ## License
 
-OpenWrt is licensed under GPL-2.0
+This repository remains based on OpenWrt and is therefore primarily governed by
+the licensing of upstream OpenWrt and the packages included in the tree.
