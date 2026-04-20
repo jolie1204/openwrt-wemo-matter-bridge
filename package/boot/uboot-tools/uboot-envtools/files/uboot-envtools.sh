@@ -42,6 +42,7 @@ ubootenv_add_app_config() {
 	config_get envsize "$1" envsize
 	config_get secsize "$1" secsize
 	config_get numsec "$1" numsec
+	touch "/etc/fw_${cfgtype#uboot}.config"
 	grep -q "^[[:space:]]*${dev}[[:space:]]*${offset}" "/etc/fw_${cfgtype#uboot}.config" || echo "$dev $offset $envsize $secsize $numsec" >>"/etc/fw_${cfgtype#uboot}.config"
 }
 
