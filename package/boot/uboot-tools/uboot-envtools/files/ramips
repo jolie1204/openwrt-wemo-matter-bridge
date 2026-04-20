@@ -91,7 +91,7 @@ wifire,s1500-nbn)
 	;;
 belkin,wemo-matter-bridge|\
 belkin,wemo-matter-bridge-8m)
-	ubootenv_add_mtd "u-boot-env" "0x0" "0x10000" "0x10000"
+	ubootenv_add_mtd "u-boot-env" "0x0" "0x1000" "0x10000"
 	;;
 bolt,arion|\
 xiaomi,mi-router-cr6606|\
