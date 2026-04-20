@@ -71,7 +71,7 @@ define Device/wemo-matter-bridge
 	-kmod-mt7603 -kmod-mt76x2 -wifi-scripts -wireless-regdb \
 	-wpad-basic-mbedtls kmod-wireguard libsqlite3 libstdcpp libupnp \
 	wireguard-tools uboot-envtools \
-	openwemo-bridge-core wemo-mtd-data wemo-matter-bridge
+	wemo-board-utils openwemo-bridge-core wemo-mtd-data wemo-matter-bridge
   SUPPORTED_DEVICES += belkin,wemo-matter-bridge
   SUPPORTED_DEVICES += wemo-matter-bridge
   SUPPORTED_DEVICES += mt7628

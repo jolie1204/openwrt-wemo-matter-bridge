@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openwemo-bridge-core
 PKG_VERSION:=0.1
-PKG_RELEASE:=9
+PKG_RELEASE:=10
 
 PKG_LICENSE:=BSD-3-Clause
 PKG_BUILD_PARALLEL:=1
@@ -74,7 +74,6 @@ define Package/openwemo-bridge-core/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wemo_ctrl/wemo_ctrl $(1)/usr/sbin/wemo_ctrl
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wemo_client/wemo_client $(1)/usr/sbin/wemo_client
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/wemo_engine/libwemoengine.so $(1)/usr/lib/libwemoengine.so
-	$(INSTALL_BIN) ./files/program-eth-mac.sh $(1)/usr/sbin/program-eth-mac.sh
 	$(INSTALL_BIN) ./files/wemo_ctrl.init $(1)/etc/init.d/wemo_ctrl
 	$(INSTALL_CONF) ./files/wemo_ctrl.conf $(1)/etc/wemo_ctrl.conf
 endef
