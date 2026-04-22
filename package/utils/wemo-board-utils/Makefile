@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wemo-board-utils
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -19,8 +19,9 @@ define Build/Compile
 endef
 
 define Package/wemo-board-utils/install
-	$(INSTALL_DIR) $(1)/usr/sbin
+	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./files/program-eth-mac.sh $(1)/usr/sbin/program-eth-mac.sh
+	$(INSTALL_BIN) ./files/90-wemo-wg0-mtu $(1)/etc/uci-defaults/90-wemo-wg0-mtu
 endef
 
 $(eval $(call BuildPackage,wemo-board-utils))

@@ -1,0 +1,10 @@
+#!/bin/sh
+
+[ "$(uci -q get network.wg0.proto)" = "wireguard" ] || exit 0
+
+current_mtu="$(uci -q get network.wg0.mtu)"
+[ "$current_mtu" = "1200" ] && exit 0
+[ -n "$current_mtu" ] && exit 0
+
+uci set network.wg0.mtu='1200'
+uci commit network
