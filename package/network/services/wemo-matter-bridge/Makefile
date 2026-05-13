@@ -1,10 +1,10 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wemo-matter-bridge
-PKG_RELEASE:=8
+PKG_RELEASE:=10
 
 PKG_SOURCE_URL:=https://github.com/jolie1204/connectedhomeip.git
-PKG_SOURCE_PROTO:=git
+PKG_SOURCE_PROTO:=git-with-metadata
 PKG_SOURCE_MIRROR:=0
 PKG_SOURCE_SUBMODULES:= \
   third_party/pigweed/repo \
@@ -13,7 +13,7 @@ PKG_SOURCE_SUBMODULES:= \
   third_party/nlio/repo
 PKG_SOURCE_DATE:=2025-12-01
 PKG_SOURCE_VERSION:=8effa808dd9fa195ec0294f0ad67c80a86dd4975
-PKG_MIRROR_HASH:=5c93da85ad2814f961b671ee8d3b9f35ed5f4c1e80cfdbdbda51334f0202aa4d
+PKG_MIRROR_HASH:=skip
 
 PKG_LICENSE:=Apache-2.0
 PKG_LICENSE_FILES:=LICENSE
@@ -25,6 +25,7 @@ PKG_BUILD_PARALLEL:=1
 LOCAL_WEMO_SOURCE_DIR:=$(TOPDIR)/../sources/wemo-matter-bridge
 
 include $(INCLUDE_DIR)/package.mk
+include $(INCLUDE_DIR)/git-with-metadata.mk
 
 define Package/wemo-matter-bridge
   SECTION:=net

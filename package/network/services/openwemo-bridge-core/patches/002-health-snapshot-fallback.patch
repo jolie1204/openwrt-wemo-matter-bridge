@@ -2,23 +2,31 @@ diff --git a/wemo_ctrl/wemo_ipc_server.c b/wemo_ctrl/wemo_ipc_server.c
 index 64f4b25..988677a 100644
 --- a/wemo_ctrl/wemo_ipc_server.c
 +++ b/wemo_ctrl/wemo_ipc_server.c
-@@ -79,6 +79,7 @@ static void proto_route_purge_sockfd(int sockfd);
- static int wemo_ipc_send(struct we_ipc_hdr *ipchdr, char *ipc_data);
- static int wemo_ipc_send_to_sock(int sockfd, struct we_ipc_hdr *ipchdr, char *ipc_data);
- static int wemo_ipc_send_internal(int target_sockfd, struct we_ipc_hdr *ipchdr, char *ipc_data);
-+static int wemo_ctrl_list_devices(struct we_device_list *out);
+@@ -25,6 +25,7 @@
+ #include "wemo_set_name_value.h"
+ #include "wemo_reset_ctrl.h"
+ #include "wemo_dev_info.h"
++#include "wemo_device_db.h"
+ #include "wemo_insight.h"
+ #include "logger.h"
  
- typedef struct broker_cmd_node {
-     int cmd;
-@@ -339,6 +340,41 @@ static void wemo_build_audit_db_path(char *out, size_t out_len)
+@@ -118,6 +119,7 @@ static proto_route_entry_t proto_routes[PROTO_ROUTE_MAX];
+ static uint32_t proto_route_seq = 0;
+ static pthread_mutex_t set_idemp_lock = PTHREAD_MUTEX_INITIALIZER;
+ 
++extern sqlite3 *ctrlpt_dev_db;
+ typedef struct {
+     int in_use;
+     uint32_t client_id;
+@@ -339,6 +341,49 @@ static void wemo_build_audit_db_path(char *out, size_t out_len)
      snprintf(out, out_len, "/tmp/wemo_txn_audit.db");
  }
  
 +static int wemo_ctrl_fill_health_snapshot_from_devices(int wemo_id, int max_items,
 +                                                       struct we_health_snapshot *out)
 +{
-+    struct we_device_list dev_list;
-+    int rc;
++    struct wemoDeviceNode *devnode;
++    int id;
 +    int i;
 +    int count = 0;
 +
@@ -26,24 +34,32 @@ index 64f4b25..988677a 100644
 +        return WE_STATUS_INVALID;
 +    }
 +
-+    rc = wemo_ctrl_list_devices(&dev_list);
-+    if (rc != WE_STATUS_OK) {
-+        return rc;
++    memset(out, 0, sizeof(*out));
++    if (max_items <= 0) {
++        max_items = WE_HEALTH_SNAPSHOT_MAX_ITEMS;
++    }
++    if (max_items > WE_HEALTH_SNAPSHOT_MAX_ITEMS) {
++        max_items = WE_HEALTH_SNAPSHOT_MAX_ITEMS;
 +    }
 +
-+    memset(out, 0, sizeof(*out));
-+    for (i = 0; i < dev_list.count && count < max_items; i++) {
-+        if (wemo_id > 0 && dev_list.items[i].wemo_id != wemo_id) {
++    ithread_mutex_lock(&DeviceListMutex);
++    devnode = GlobalDeviceList;
++    for (i = 0; devnode != NULL && count < max_items; i++, devnode = devnode->next) {
++        id = wemo_dev_db_retrieve_id(ctrlpt_dev_db, devnode->device.UDN);
++        if (id <= 0) {
++            continue;
++        }
++        if (wemo_id > 0 && id != wemo_id) {
 +            continue;
 +        }
 +
-+        out->items[count].wemo_id = dev_list.items[i].wemo_id;
++        out->items[count].wemo_id = id;
 +        count++;
-+
 +        if (wemo_id > 0) {
 +            break;
 +        }
 +    }
++    ithread_mutex_unlock(&DeviceListMutex);
 +
 +    out->count = count;
 +    return WE_STATUS_OK;

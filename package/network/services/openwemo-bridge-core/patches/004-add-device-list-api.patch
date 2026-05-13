@@ -1,0 +1,159 @@
+--- a/wemo_engine/wemo_engine.h
++++ b/wemo_engine/wemo_engine.h
+@@ -152,6 +152,23 @@ struct we_state {
+     int level;
+ };
+ 
++#define WE_DEVICE_LIST_MAX_ITEMS 64
++
++struct we_device_info {
++    int wemo_id;
++    char udn[256];
++    char friendly_name[256];
++    int device_type;
++    int is_online;
++    int state;
++    int level;
++};
++
++struct we_device_list {
++    int count;
++    struct we_device_info items[WE_DEVICE_LIST_MAX_ITEMS];
++};
++
+ struct we_firmware_data {
+     long start_time;
+     int unsign_img;
+@@ -341,6 +360,7 @@ int we_del_action(int wemo_id, struct we
+ int we_get_netstate(int wemo_id, struct we_network_status *network_status);
+ /* command wemoApp to connect to designated AP */
+ int we_connect(int wemo_id, struct we_conn_data *conn_data);
++int we_list_devices(struct we_device_list *out);
+ int we_closesetup(int wemo_id);
+ int we_discover(int wemo_id);
+ int we_forget_action(int wemo_id);
+--- a/wemo_engine/wemo_engine.c
++++ b/wemo_engine/wemo_engine.c
+@@ -309,6 +309,39 @@ static void we_build_state_db_path(char
+     snprintf(out, out_len, "/var/tmp/wemo-matter/wemo_state.db");
+ }
+ 
++static void we_build_device_db_path(char *out, size_t out_len)
++{
++    const char *override = getenv("WEMO_DEVICE_DB_PATH");
++    const char *home = getenv("HOME");
++    if (out == NULL || out_len == 0) {
++        return;
++    }
++    out[0] = '\0';
++    if (override != NULL && override[0] != '\0') {
++        snprintf(out, out_len, "%s", override);
++        return;
++    }
++    if (geteuid() == 0) {
++        snprintf(out, out_len, "/var/lib/wemo-matter/wemo_device.db");
++        return;
++    }
++    if (home != NULL && home[0] != '\0') {
++        snprintf(out, out_len, "%s/.local/state/wemo-matter/wemo_device.db", home);
++        return;
++    }
++    snprintf(out, out_len, "/var/tmp/wemo-matter/wemo_device.db");
++}
++
++static void we_copy_column_text(char *out, size_t out_len, sqlite3_stmt *stmt, int column)
++{
++    const unsigned char *text;
++    if (out == NULL || out_len == 0) {
++        return;
++    }
++    text = sqlite3_column_text(stmt, column);
++    snprintf(out, out_len, "%s", text == NULL ? "" : (const char *)text);
++}
++
+ static int we_get_online_state_from_db(int wemo_id, int *is_online_out)
+ {
+     sqlite3 *db = NULL;
+@@ -2460,6 +2493,82 @@ int we_schedule_dataExport(int wemo_id,
+     return we_send_command(CMD_SCHEDULE_DATA_EXPORT, wemo_id, export, sizeof(struct we_insight_export));
+ }
+ 
++int we_list_devices(struct we_device_list *out)
++{
++    sqlite3 *db = NULL;
++    sqlite3_stmt *stmt = NULL;
++    char state_path[256];
++    char device_path[256];
++    char *attach_sql = NULL;
++    const char *sql =
++        "SELECT d.wemo_id,d.UDN,d.friendly_name,d.device_type,"
++        "COALESCE(s.is_online,0),COALESCE(binary.value,-1),COALESCE(level.value,-1) "
++        "FROM dev.wemo_device d "
++        "LEFT JOIN state s ON s.wemo_id=d.wemo_id "
++        "LEFT JOIN state_capability binary ON binary.wemo_id=d.wemo_id AND binary.cap=1 "
++        "LEFT JOIN state_capability level ON level.wemo_id=d.wemo_id AND level.cap=2 "
++        "ORDER BY d.wemo_id ASC;";
++    int count = 0;
++    int rc;
++
++    if (out == NULL) {
++        return WE_STATUS_INVALID;
++    }
++    memset(out, 0, sizeof(*out));
++
++    we_build_state_db_path(state_path, sizeof(state_path));
++    we_build_device_db_path(device_path, sizeof(device_path));
++    if (state_path[0] == '\0' || device_path[0] == '\0') {
++        return WE_STATUS_INVALID;
++    }
++
++    rc = sqlite3_open_v2(state_path, &db, SQLITE_OPEN_READONLY, NULL);
++    if (rc != SQLITE_OK) {
++        if (db != NULL) {
++            sqlite3_close(db);
++        }
++        return WE_STATUS_INTERNAL;
++    }
++
++    attach_sql = sqlite3_mprintf("ATTACH DATABASE %Q AS dev", device_path);
++    if (attach_sql == NULL) {
++        sqlite3_close(db);
++        return WE_STATUS_INTERNAL;
++    }
++    rc = sqlite3_exec(db, attach_sql, NULL, NULL, NULL);
++    sqlite3_free(attach_sql);
++    if (rc != SQLITE_OK) {
++        sqlite3_close(db);
++        return WE_STATUS_INTERNAL;
++    }
++
++    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
++    if (rc != SQLITE_OK) {
++        sqlite3_exec(db, "DETACH DATABASE dev", NULL, NULL, NULL);
++        sqlite3_close(db);
++        return WE_STATUS_INTERNAL;
++    }
++
++    while (count < WE_DEVICE_LIST_MAX_ITEMS && sqlite3_step(stmt) == SQLITE_ROW) {
++        struct we_device_info *info = &out->items[count];
++        memset(info, 0, sizeof(*info));
++        info->wemo_id = sqlite3_column_int(stmt, 0);
++        we_copy_column_text(info->udn, sizeof(info->udn), stmt, 1);
++        we_copy_column_text(info->friendly_name, sizeof(info->friendly_name), stmt, 2);
++        info->device_type = sqlite3_column_int(stmt, 3);
++        info->is_online = sqlite3_column_int(stmt, 4);
++        info->state = sqlite3_column_int(stmt, 5);
++        info->level = sqlite3_column_int(stmt, 6);
++        count++;
++    }
++
++    sqlite3_finalize(stmt);
++    sqlite3_exec(db, "DETACH DATABASE dev", NULL, NULL, NULL);
++    sqlite3_close(db);
++    out->count = count;
++    return WE_STATUS_OK;
++}
++
+ int we_end()
+ {
+     int i;

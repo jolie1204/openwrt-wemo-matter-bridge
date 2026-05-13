@@ -16,7 +16,7 @@ define Package/openwemo-bridge-core
   CATEGORY:=Network
   TITLE:=OpenWeMo control daemon and engine
   URL:=https://github.com/jolie1204/openwemo-bridge-core
-  DEPENDS:=+libatomic +libpthread +libsqlite3 +libupnp +wemo-mtd-data
+  DEPENDS:=+libatomic +libpthread +libsqlite3 +libupnp +libopenssl +wemo-mtd-data
 endef
 
 define Package/openwemo-bridge-core/description
