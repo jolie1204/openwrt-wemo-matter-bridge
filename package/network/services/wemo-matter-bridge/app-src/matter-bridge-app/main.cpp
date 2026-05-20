@@ -1460,7 +1460,6 @@ void ApplicationInit()
     // This refresh causes wemo_ctrl to re-probe all devices and deliver fresh
     // state events, so bridged devices come online quickly after startup.
     gWemoAdapter.Refresh();
-    gWemoAdapter.PollStates();
     StartWemoStatePolling();
 
     gRooms.clear();

@@ -90,16 +90,24 @@ bool SendState(int wemo_id, int state, int level)
 
 StateEventCallback gStateCallback;
 
-void OnWeStateEvent(int wemo_id, struct we_state * data)
+void EmitStateEvent(int wemo_id, const struct we_state & data)
 {
-    if (gStateCallback && data != nullptr)
+    if (gStateCallback)
     {
         WemoStateEvent ev;
         ev.wemo_id  = wemo_id;
-        ev.is_online = (data->is_online != 0);
-        ev.state     = data->state;
-        ev.level     = data->level;
+        ev.is_online = (data.is_online != 0);
+        ev.state     = data.state;
+        ev.level     = data.level;
         gStateCallback(ev);
+    }
+}
+
+void OnWeStateEvent(int wemo_id, struct we_state * data)
+{
+    if (data != nullptr)
+    {
+        EmitStateEvent(wemo_id, *data);
     }
 }
 #endif
@@ -188,33 +196,40 @@ void WemoAdapterOpenWemo::PollStates()
         return;
     }
 
+    struct PolledState
+    {
+        int wemo_id;
+        struct we_state state;
+    };
+    std::vector<PolledState> polled;
+
     const int count = std::clamp(list.count, 0, WE_DEVICE_LIST_MAX_ITEMS);
+    polled.reserve(static_cast<size_t>(count));
     {
         std::lock_guard<std::mutex> lock(mCacheMutex);
         for (int i = 0; i < count; i++)
         {
-            if (list.items[i].wemo_id > 0 && list.items[i].udn[0] != '\0')
+            const struct we_device_info & info = list.items[i];
+            if (info.wemo_id <= 0)
             {
-                mUdnToWemoId[list.items[i].udn] = list.items[i].wemo_id;
+                continue;
             }
+            if (info.udn[0] != '\0')
+            {
+                mUdnToWemoId[info.udn] = info.wemo_id;
+            }
+
+            struct we_state state {};
+            state.is_online = info.is_online;
+            state.state     = info.state;
+            state.level     = info.level;
+            polled.push_back({ info.wemo_id, state });
         }
     }
 
-    for (int i = 0; i < count; i++)
+    for (const auto & entry : polled)
     {
-        const int wemo_id = list.items[i].wemo_id;
-        if (wemo_id <= 0)
-        {
-            continue;
-        }
-
-        struct we_state state {};
-        const int get_rc = we_get_action(wemo_id, &state);
-        if (get_rc == 0)
-        {
-            std::fprintf(stderr, "wemo_adapter: state poll get failed wemo_id=%d\n", wemo_id);
-        }
-        usleep(50000);
+        EmitStateEvent(entry.wemo_id, entry.state);
     }
 #endif
 }
