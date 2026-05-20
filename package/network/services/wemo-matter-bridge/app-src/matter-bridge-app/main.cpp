@@ -60,7 +60,9 @@
 #include <array>
 #include <cassert>
 #include <cinttypes>
+#include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -242,9 +244,12 @@ DeviceOnOff ActionLight4("Action Light 4", "Room 2");
 
 // WeMo bridge adapter talking to wemo_ctrl/openwemo engine.
 wemo_bridge::WemoAdapterOpenWemo gWemoAdapter("127.0.0.1:49153");
+std::atomic_bool gWemoStatePollStarted { false };
 
 // Max cluster count across both endpoint types for DataVersion storage.
 constexpr size_t kMaxBridgedClusters = MATTER_ARRAY_SIZE(bridgedDimmableLightClusters);
+constexpr int kDefaultWemoStatePollIntervalSec = 15;
+constexpr int kMinWemoStatePollIntervalSec = 5;
 
 struct BridgedWemoLight
 {
@@ -1256,6 +1261,40 @@ void HandleWemoEventOnMatterThread(intptr_t closure)
     Platform::Delete(ctx);
 }
 
+int GetWemoStatePollIntervalSec()
+{
+    const char * env = std::getenv("WEMO_STATE_POLL_INTERVAL_SEC");
+    if (env == nullptr || env[0] == '\0')
+    {
+        return kDefaultWemoStatePollIntervalSec;
+    }
+
+    int interval = std::atoi(env);
+    if (interval < kMinWemoStatePollIntervalSec)
+    {
+        interval = kMinWemoStatePollIntervalSec;
+    }
+    return interval;
+}
+
+void StartWemoStatePolling()
+{
+    if (gWemoStatePollStarted.exchange(true))
+    {
+        return;
+    }
+
+    const int intervalSec = GetWemoStatePollIntervalSec();
+    std::thread([intervalSec]() {
+        ChipLogProgress(DeviceLayer, "WeMo state reconciliation poll interval=%ds", intervalSec);
+        while (true)
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(intervalSec));
+            gWemoAdapter.PollStates();
+        }
+    }).detach();
+}
+
 } // namespace
 
 void ApplicationInit()
@@ -1421,6 +1460,8 @@ void ApplicationInit()
     // This refresh causes wemo_ctrl to re-probe all devices and deliver fresh
     // state events, so bridged devices come online quickly after startup.
     gWemoAdapter.Refresh();
+    gWemoAdapter.PollStates();
+    StartWemoStatePolling();
 
     gRooms.clear();
     gActions.clear();

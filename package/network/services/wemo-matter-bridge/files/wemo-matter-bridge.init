@@ -9,6 +9,7 @@ NETWORK=lan
 DEFAULT_IFACE=br-lan
 WAIT_SECS=90
 READY_SETTLE_SECS=2
+STATE_POLL_INTERVAL_SECS=15
 
 resolve_ifname()
 {
@@ -80,7 +81,8 @@ start_service()
 		--interface-id "$ifname"
 	procd_set_param env \
 		WEMO_DEVICE_DB_PATH="$STATE_DIR/wemo_device.db" \
-		WEMO_STATE_DB_PATH="$STATE_DIR/wemo_state.db"
+		WEMO_STATE_DB_PATH="$STATE_DIR/wemo_state.db" \
+		WEMO_STATE_POLL_INTERVAL_SEC="$STATE_POLL_INTERVAL_SECS"
 	procd_set_param stdout 1
 	procd_set_param stderr 1
 	procd_set_param respawn 3000 5 5

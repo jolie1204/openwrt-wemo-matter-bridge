@@ -172,6 +172,53 @@ void WemoAdapterOpenWemo::Refresh()
 #endif
 }
 
+void WemoAdapterOpenWemo::PollStates()
+{
+#if HAVE_OPENWEMO_ENGINE
+    if (!EnsureEngineInitialized(mEngineSocket))
+    {
+        return;
+    }
+
+    struct we_device_list list {};
+    const int rc = we_list_devices(&list);
+    if (rc != WE_STATUS_OK)
+    {
+        std::fprintf(stderr, "wemo_adapter: state poll list_devices failed rc=%d\n", rc);
+        return;
+    }
+
+    const int count = std::clamp(list.count, 0, WE_DEVICE_LIST_MAX_ITEMS);
+    {
+        std::lock_guard<std::mutex> lock(mCacheMutex);
+        for (int i = 0; i < count; i++)
+        {
+            if (list.items[i].wemo_id > 0 && list.items[i].udn[0] != '\0')
+            {
+                mUdnToWemoId[list.items[i].udn] = list.items[i].wemo_id;
+            }
+        }
+    }
+
+    for (int i = 0; i < count; i++)
+    {
+        const int wemo_id = list.items[i].wemo_id;
+        if (wemo_id <= 0)
+        {
+            continue;
+        }
+
+        struct we_state state {};
+        const int get_rc = we_get_action(wemo_id, &state);
+        if (get_rc == 0)
+        {
+            std::fprintf(stderr, "wemo_adapter: state poll get failed wemo_id=%d\n", wemo_id);
+        }
+        usleep(50000);
+    }
+#endif
+}
+
 void WemoAdapterOpenWemo::RegisterStateCallback(StateEventCallback cb)
 {
 #if HAVE_OPENWEMO_ENGINE

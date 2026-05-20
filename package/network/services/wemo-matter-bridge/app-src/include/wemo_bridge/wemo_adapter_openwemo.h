@@ -15,6 +15,7 @@ public:
 
     std::vector<WemoDevice> Discover() override;
     void Refresh() override;
+    void PollStates();
     bool SetOnOff(const std::string & udn, bool on) override;
     bool SetLevelPercent(const std::string & udn, uint8_t percent) override;
     void RegisterStateCallback(StateEventCallback cb) override;
