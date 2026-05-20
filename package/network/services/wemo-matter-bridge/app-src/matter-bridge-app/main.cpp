@@ -250,6 +250,8 @@ std::atomic_bool gWemoStatePollStarted { false };
 constexpr size_t kMaxBridgedClusters = MATTER_ARRAY_SIZE(bridgedDimmableLightClusters);
 constexpr int kDefaultWemoStatePollIntervalSec = 15;
 constexpr int kMinWemoStatePollIntervalSec = 5;
+constexpr int kDefaultWemoInitialDiscoveryWaitSec = 90;
+constexpr int kWemoInitialDiscoveryRetrySec = 2;
 
 struct BridgedWemoLight
 {
@@ -1277,6 +1279,46 @@ int GetWemoStatePollIntervalSec()
     return interval;
 }
 
+int GetWemoInitialDiscoveryWaitSec()
+{
+    const char * env = std::getenv("WEMO_INITIAL_DISCOVERY_WAIT_SEC");
+    if (env == nullptr || env[0] == '\0')
+    {
+        return kDefaultWemoInitialDiscoveryWaitSec;
+    }
+
+    int waitSec = std::atoi(env);
+    if (waitSec < 0)
+    {
+        waitSec = 0;
+    }
+    return waitSec;
+}
+
+std::vector<wemo_bridge::WemoDevice> DiscoverWemoDevicesForStartup()
+{
+    std::vector<wemo_bridge::WemoDevice> discovered = gWemoAdapter.Discover();
+    const int waitSec = GetWemoInitialDiscoveryWaitSec();
+
+    for (int elapsedSec = 0; discovered.empty() && elapsedSec < waitSec; elapsedSec += kWemoInitialDiscoveryRetrySec)
+    {
+        ChipLogProgress(DeviceLayer, "WeMo discovery returned no devices; retrying startup scan");
+        std::this_thread::sleep_for(std::chrono::seconds(kWemoInitialDiscoveryRetrySec));
+        discovered = gWemoAdapter.Discover();
+    }
+
+    if (discovered.empty())
+    {
+        ChipLogError(DeviceLayer, "WeMo discovery found no devices before Matter endpoint publication");
+    }
+    else
+    {
+        ChipLogProgress(DeviceLayer, "WeMo discovery found %zu devices for Matter endpoint publication", discovered.size());
+    }
+
+    return discovered;
+}
+
 void StartWemoStatePolling()
 {
     if (gWemoStatePollStarted.exchange(true))
@@ -1299,7 +1341,7 @@ void StartWemoStatePolling()
 
 void ApplicationInit()
 {
-    auto discovered = gWemoAdapter.Discover();
+    auto discovered = DiscoverWemoDevicesForStartup();
     std::sort(discovered.begin(), discovered.end(), [](const auto & a, const auto & b) {
         if (a.udn != b.udn)
         {
