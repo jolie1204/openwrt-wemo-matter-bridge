@@ -67,6 +67,7 @@ You will enter a command loop. Type `help` to see the supported commands.
 Discovery / inventory:
 - `discover`
 - `listdev`
+- `snapshot`
 - `printdev <devnum>`
 - `getstate <devnum>`
 - `getnetstate <devnum>`
@@ -96,10 +97,13 @@ Wi‑Fi setup (only if you still use onboarding flows):
 Preferred integration pattern:
 - Run `wemo_ctrl` as a daemon (handles discovery + event subscriptions).
 - The Matter bridge links to and calls `wemo_engine` APIs to:
-  - enumerate devices (or query sqlite DB)
-  - read current state/level
+  - enumerate devices and read current state/level with `we_get_cached_device_list()`
   - set state/level
   - register callbacks for state changes (push into Matter attribute reports)
+- `we_get_cached_device_list()` returns the controller's cached sqlite/state
+  snapshot and does not actively probe devices.
+- `we_get_action()` / `CMD_GET` are active physical-device probes; avoid using
+  them as a high-frequency bridge polling path.
 
 Identity:
 - Use WeMo **UDN** as the canonical key.

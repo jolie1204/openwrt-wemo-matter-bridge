@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 
 #include <pthread.h>
@@ -55,6 +56,9 @@ static char audit_db_path[256] = {0};
 #define WE_CIRCUIT_OPEN_TIMEOUT_STREAK 3
 #define WE_CIRCUIT_COOLDOWN_BASE_MS 3000
 #define WE_CIRCUIT_COOLDOWN_MAX_MS 30000
+#define WE_CACHED_LIST_RETRY_MAX 3
+#define WE_CACHED_LIST_RETRY_DELAY_MS 100
+#define WE_IPC_QUERY_TIMEOUT_MS 1000
 
 typedef struct {
     int in_use;
@@ -670,6 +674,21 @@ static int we_read_full(int fd, void *buf, size_t len)
     return 1;
 }
 
+static int we_set_ipc_query_timeout(int fd)
+{
+    struct timeval tv;
+
+    tv.tv_sec = WE_IPC_QUERY_TIMEOUT_MS / 1000;
+    tv.tv_usec = (WE_IPC_QUERY_TIMEOUT_MS % 1000) * 1000;
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+        return 0;
+    }
+    if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+        return 0;
+    }
+    return 1;
+}
+
 static int we_fetch_health_snapshot_remote(int wemo_id, struct we_health_snapshot *snapshot, int max_items)
 {
     int fd = -1;
@@ -777,7 +796,7 @@ static int we_fetch_health_snapshot_remote(int wemo_id, struct we_health_snapsho
     return WE_STATUS_OK;
 }
 
-int we_list_devices(struct we_device_list *out)
+static int we_fetch_cached_device_list_once(struct we_device_list *out)
 {
     int fd = -1;
     struct sockaddr_in server;
@@ -795,6 +814,10 @@ int we_list_devices(struct we_device_list *out)
 
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
+        return WE_STATUS_INTERNAL;
+    }
+    if (!we_set_ipc_query_timeout(fd)) {
+        close(fd);
         return WE_STATUS_INTERNAL;
     }
     memset(&server, 0, sizeof(server));
@@ -873,6 +896,41 @@ int we_list_devices(struct we_device_list *out)
         out->count = WE_DEVICE_LIST_MAX_ITEMS;
     }
     return WE_STATUS_OK;
+}
+
+int we_get_cached_device_list(struct we_device_list *out)
+{
+    int attempt;
+    int rc = WE_STATUS_INTERNAL;
+
+    if (out == NULL) {
+        return WE_STATUS_INVALID;
+    }
+    memset(out, 0, sizeof(*out));
+
+    for (attempt = 0; attempt < WE_CACHED_LIST_RETRY_MAX; attempt++) {
+        struct we_device_list tmp;
+
+        memset(&tmp, 0, sizeof(tmp));
+        rc = we_fetch_cached_device_list_once(&tmp);
+        if (rc == WE_STATUS_OK) {
+            memcpy(out, &tmp, sizeof(*out));
+            return WE_STATUS_OK;
+        }
+        if (rc == WE_STATUS_INVALID) {
+            break;
+        }
+        if (attempt + 1 < WE_CACHED_LIST_RETRY_MAX) {
+            usleep((useconds_t)WE_CACHED_LIST_RETRY_DELAY_MS * 1000);
+        }
+    }
+
+    return rc;
+}
+
+int we_list_devices(struct we_device_list *out)
+{
+    return we_get_cached_device_list(out);
 }
 
 static int we_health_delta_significant(const struct we_device_health *before,

@@ -95,6 +95,7 @@ Inside `wemo_client`:
 
 ```text
 listdev
+snapshot
 discover
 poweron <devnum>
 poweroff <devnum>
@@ -147,6 +148,11 @@ These scripts expect local build artifacts and typically start/stop `wemo_ctrl` 
 - Full Matter bridge packaging/integration is planned for a future release.
 - Keep `wemo_ctrl` running continuously.
 - Have bridge process link to `wemo_engine` or talk to IPC endpoint.
+- Use `we_get_cached_device_list()` for bridge status reconciliation. It returns
+  the controller's cached sqlite/state snapshot and does not actively probe LAN
+  devices.
+- Treat `we_get_action()` / `CMD_GET` as active device probes. Do not use them
+  as a high-frequency Matter polling path.
 - Use WeMo `UDN` as stable identity key and persist endpoint mapping on the bridge side.
 - Ensure LAN supports multicast/SSDP and host firewall allows required UDP traffic.
 

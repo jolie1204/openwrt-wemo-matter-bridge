@@ -48,6 +48,7 @@ enum cmdloop_cmds {
     GETSTATE,
     PRTDEV,
     LSTDEV,
+    SNAPSHOT,
     DELDEV,
     FORGETDEV,
     SETUP,
@@ -86,6 +87,7 @@ struct cmdloop_commands {
 static struct cmdloop_commands cmdloop_cmdlist[] = {
     {"help", HELP, 1, ""},
     {"listdev", LSTDEV, 1, ""},
+    {"snapshot", SNAPSHOT, 1, ""},
     {"printdev", PRTDEV, 2, "<devnum>"},
     {"poweron", POWON, 2, "<devnum>"},
     {"poweroff", POWOFF, 2, "<devnum>"},
@@ -726,6 +728,7 @@ void printhelp()
     printf("commands:\n");
     printf("\thelp\n");
     printf("\tlistdev\n");
+    printf("\tsnapshot\n");
     printf("\tprintdev <devnum>\n");
     printf("\tpoweron <devnum>\n");
     printf("\tpoweroff <devnum>\n");
@@ -981,6 +984,60 @@ void wemo_list_devices()
     sqlite3_close(db);
 }
 
+static const char *wemo_device_type_name(int type)
+{
+    switch (type) {
+    case WEMO_SWITCH:
+        return "switch";
+    case WEMO_LIGHT:
+        return "light";
+    case WEMO_MINI:
+        return "mini";
+    case WEMO_DIMMER:
+        return "dimmer";
+    case WEMO_INSIGHT:
+        return "insight";
+    case WEMO_SENSOR:
+        return "sensor";
+    case WEMO_NONE:
+        return "none";
+    default:
+        return "unknown";
+    }
+}
+
+void wemo_print_cached_device_list()
+{
+    struct we_device_list list;
+    int rc;
+    int i;
+
+    rc = we_get_cached_device_list(&list);
+    if (rc != WE_STATUS_OK) {
+        if (!client_quiet_all) {
+            fprintf(stderr, "snapshot failed: rc=%d\n", rc);
+        }
+        return;
+    }
+    if (client_quiet_all) {
+        return;
+    }
+
+    printf("cached devices: count=%d\n", list.count);
+    for (i = 0; i < list.count; i++) {
+        const struct we_device_info *d = &list.items[i];
+        printf("id=%d online=%d state=%d level=%d type=%s(%d) udn=%s name=\"%s\"\n",
+               d->wemo_id,
+               d->is_online,
+               d->state,
+               d->level,
+               wemo_device_type_name(d->device_type),
+               d->device_type,
+               d->udn[0] ? d->udn : "-",
+               d->friendly_name[0] ? d->friendly_name : "-");
+    }
+}
+
 void wemo_print_device(int wemo_id)
 {
     sqlite3 *db;
@@ -1154,6 +1211,9 @@ void wemo_client_process_command(char *cmdline)
         break;
     case LSTDEV:
         wemo_list_devices();
+        break;
+    case SNAPSHOT:
+        wemo_print_cached_device_list();
         break;
     case SETUP:
         send_ipc_command("setup", CMD_SETUP, arg1, &conn_data, sizeof(struct we_conn_data));

@@ -393,6 +393,11 @@ int we_get_device_health_snapshot(struct we_device_health *health_out, int max_i
 int we_get_device_health_snapshot_remote(int wemo_id, struct we_device_health *health_out, int max_items);
 int we_get_health_deltas(struct we_health_delta *out, int max_items);
 int we_bridge_preflight_device(int wemo_id, struct we_bridge_preflight_result *out);
+/* Return the controller's cached DB/state snapshot.
+ * This does not actively probe WeMo devices on the LAN and returns WE_STATUS_*.
+ */
+int we_get_cached_device_list(struct we_device_list *out);
+/* Compatibility wrapper for we_get_cached_device_list(). */
 int we_list_devices(struct we_device_list *out);
 
 /* stop IPC and clean up */
