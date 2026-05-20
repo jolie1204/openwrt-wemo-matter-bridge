@@ -1,0 +1,19 @@
+[Unit]
+Description=WeMo LAN Controller (wemo_ctrl)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/wemo-bridge/wemo-bridge.env
+ExecStartPre=/bin/bash -lc 'mkdir -p "$(dirname "$WEMO_CTRL_LOG")" "$(dirname "$WEMO_DEVICE_DB")"'
+ExecStart=/bin/bash -lc 'exec "$WEMO_CTRL_BIN" >>"$WEMO_CTRL_LOG" 2>&1'
+WorkingDirectory=/
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+

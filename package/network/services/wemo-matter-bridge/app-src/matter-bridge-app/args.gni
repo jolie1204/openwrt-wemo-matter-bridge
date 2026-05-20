@@ -1,0 +1,26 @@
+import("//build_overrides/chip.gni")
+chip_root = "//connectedhomeip"
+build_root = "//connectedhomeip/build"
+chip_build_tests = false
+pw_build_PIP_CONSTRAINTS = [ "${chip_root}/scripts/setup/constraints.txt" ]
+pw_build_PIP_REQUIREMENTS = [ "${chip_root}/scripts/setup/requirements.build.txt" ]
+
+chip_device_project_config_include = "<CHIPProjectAppConfig.h>"
+chip_project_config_include = "<CHIPProjectAppConfig.h>"
+chip_system_project_config_include = "<SystemProjectConfig.h>"
+
+chip_project_config_include_dirs = [
+  "//include",
+  "${chip_root}/examples/bridge-app/bridge-common/include",
+  "${chip_root}/config/standalone",
+]
+
+# Ethernet-only bridge host profile.
+chip_config_network_layer_ble = false
+chip_enable_ble = false
+chip_enable_thread = false
+chip_enable_wifi = false
+chip_enable_ethernet = true
+chip_support_thread_meshcop = false
+
+matter_enable_tracing_support = true

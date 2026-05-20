@@ -2,12 +2,10 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openwemo-bridge-core
 PKG_VERSION:=0.1
-PKG_RELEASE:=10
+PKG_RELEASE:=11
 
 PKG_LICENSE:=BSD-3-Clause
 PKG_BUILD_PARALLEL:=1
-
-LOCAL_SOURCE_DIR:=$(TOPDIR)/../sources/openwemo-bridge-core
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -15,7 +13,7 @@ define Package/openwemo-bridge-core
   SECTION:=net
   CATEGORY:=Network
   TITLE:=OpenWeMo control daemon and engine
-  URL:=https://github.com/jolie1204/openwemo-bridge-core
+  URL:=https://github.com/jolie1204/openwrt-wemo-matter-bridge
   DEPENDS:=+libatomic +libpthread +libsqlite3 +libupnp +libopenssl +wemo-mtd-data
 endef
 
@@ -32,11 +30,7 @@ endef
 define Build/Prepare
 	rm -rf $(PKG_BUILD_DIR)
 	mkdir -p $(PKG_BUILD_DIR)
-	[ -f "$(LOCAL_SOURCE_DIR)/wemo_ctrl/Makefile" ] || { \
-		echo "ERROR: missing local source at $(LOCAL_SOURCE_DIR)"; \
-		exit 1; \
-	}
-	$(CP) $(LOCAL_SOURCE_DIR)/. $(PKG_BUILD_DIR)/
+	$(CP) ./src/. $(PKG_BUILD_DIR)/
 	$(INSTALL_DATA) ./files/atomic_compat.h $(PKG_BUILD_DIR)/atomic_compat.h
 	$(INSTALL_DATA) ./files/ithread.h $(PKG_BUILD_DIR)/wemo_ctrl/ithread.h
 	$(Build/Patch)

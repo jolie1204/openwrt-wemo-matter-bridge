@@ -1,0 +1,21 @@
+[Unit]
+Description=WeMo Matter Bridge App
+After=network-online.target wemo-ctrl.service
+Wants=network-online.target
+Requires=wemo-ctrl.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/wemo-bridge/wemo-bridge.env
+ExecStartPre=/bin/bash -lc 'mkdir -p "$(dirname "$WEMO_BRIDGE_LOG")" "$(dirname "$CHIP_KVS_FILE")"'
+ExecStartPre=/bin/bash -lc 'sleep "${WEMO_CTRL_WARMUP_SECS:-8}"'
+ExecStart=/bin/bash -lc 'export LD_LIBRARY_PATH="$WEMO_ENGINE_LIBDIR:${LD_LIBRARY_PATH:-}"; exec "$WEMO_BRIDGE_BIN" --KVS "$CHIP_KVS_FILE" --interface-id "$BRIDGE_INTERFACE_ID" ${BRIDGE_EXTRA_ARGS:-} >>"$WEMO_BRIDGE_LOG" 2>&1'
+WorkingDirectory=/
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+

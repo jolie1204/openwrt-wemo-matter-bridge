@@ -1,0 +1,25 @@
+diff --git a/src/app/clusters/unit-localization-server/UnitLocalizationCluster.cpp b/src/app/clusters/unit-localization-server/UnitLocalizationCluster.cpp
+index bd6dbf7e4e..e0e16be96b 100644
+--- a/src/app/clusters/unit-localization-server/UnitLocalizationCluster.cpp
++++ b/src/app/clusters/unit-localization-server/UnitLocalizationCluster.cpp
+@@ -46,12 +46,19 @@ CHIP_ERROR UnitLocalizationCluster::Startup(ServerClusterContext & context)
+         mTemperatureUnit = static_cast<TempUnitEnum>(storedTempUnit);
+         ChipLogDetail(Zcl, "UnitLocalization ep0 Loaded TemperatureUnit: %u", storedTempUnit);
+     }
++    else if (err == CHIP_ERROR_PERSISTED_STORAGE_VALUE_NOT_FOUND)
++    {
++        // First boot/no prior persisted value: keep default and continue.
++        err = CHIP_NO_ERROR;
++        ChipLogDetail(Zcl, "UnitLocalization ep0 set default TemperatureUnit: %u", to_underlying(mTemperatureUnit));
++    }
+     else
+     {
+         ChipLogDetail(Zcl, "UnitLocalization ep0 set default TemperatureUnit: %u", to_underlying(mTemperatureUnit));
+     }
+ 
+-    return err;
++    // Missing persisted values are valid on first boot; keep in-memory defaults.
++    return CHIP_NO_ERROR;
+ }
+ 
+ CHIP_ERROR UnitLocalizationCluster::SetSupportedTemperatureUnits(DataModel::List<TempUnitEnum> & units)

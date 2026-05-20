@@ -1,0 +1,81 @@
+import("//build_overrides/chip.gni")
+import("${chip_root}/build/chip/tools.gni")
+
+assert(chip_build_tools)
+
+wemo_chip_state_dir = getenv("WEMO_CHIP_STATE_DIR")
+if (wemo_chip_state_dir == "") {
+  wemo_chip_state_dir = "/tmp/wemo-bridge/chip"
+}
+
+wemo_engine_rpath = getenv("WEMO_ENGINE_RPATH")
+if (wemo_engine_rpath == "") {
+  wemo_engine_rpath = "$ORIGIN"
+}
+
+executable("wemo-bridge-app") {
+  sources = [
+    "${chip_root}/examples/bridge-app/bridge-common/include/CHIPProjectAppConfig.h",
+    "${chip_root}/examples/bridge-app/linux/bridged-actions-stub.cpp",
+    "${chip_root}/examples/bridge-app/linux/Device.cpp",
+    "${chip_root}/examples/bridge-app/linux/include/Device.h",
+    "${chip_root}/examples/bridge-app/linux/include/main.h",
+    "DeviceDimmable.cpp",
+    "main.cpp",
+    "../src/adapters/wemo/wemo_adapter_openwemo.cpp",
+    "../src/matter/endpoint_registry.cpp",
+  ]
+
+  deps = [
+    "${chip_root}/examples/bridge-app/bridge-common",
+    "${chip_root}/examples/platform/linux:app-main",
+    "${chip_root}/src/app/clusters/identify-server:identify-server",
+    "${chip_root}/src/lib",
+  ]
+
+  cflags = [
+    "-Wconversion",
+    "-Wno-shadow",
+  ]
+  defines = [
+    "HAVE_OPENWEMO_ENGINE=1",
+    # Advertise this node as an Aggregator for bridge classification.
+    "CHIP_DEVICE_CONFIG_DEVICE_TYPE=0x000E",
+    # Persist CHIP storage in configurable path; defaults to /tmp/wemo-bridge/chip.
+    "FATCONFDIR=\"" + wemo_chip_state_dir + "\"",
+    "SYSCONFDIR=\"" + wemo_chip_state_dir + "\"",
+    "LOCALSTATEDIR=\"" + wemo_chip_state_dir + "\"",
+    "CHIP_CONFIG_KVS_PATH=\"" + wemo_chip_state_dir + "/chip_kvs\"",
+  ]
+
+  include_dirs = [
+    "${chip_root}/examples/bridge-app/linux/include",
+    "include",
+    "../include",
+    "../../openwemo-bridge-core/wemo_engine",
+  ]
+
+  lib_dirs = [
+    "../../openwemo-bridge-core/wemo_engine",
+    "/usr/local/lib",
+  ]
+
+  libs = [
+    "wemoengine",
+    "sqlite3",
+    "ixml",
+    "upnp",
+    "pthread",
+  ]
+
+  ldflags = [
+    "-Wl,-rpath," + wemo_engine_rpath,
+    "-Wl,-rpath,/usr/local/lib",
+  ]
+
+  output_dir = root_out_dir
+}
+
+group("default") {
+  deps = [ ":wemo-bridge-app" ]
+}

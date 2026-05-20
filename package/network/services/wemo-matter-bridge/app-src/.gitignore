@@ -1,0 +1,13 @@
+/build/
+/build-openwemo/
+/out/
+/matter-bridge-app/out/
+/.cache/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+var/
+*.swp
+.vscode/
+.DS_Store

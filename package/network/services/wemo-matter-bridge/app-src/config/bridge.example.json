@@ -1,0 +1,7 @@
+{
+  "endpoint_registry_db": "./var/endpoint-map.sqlite3",
+  "wemo": {
+    "discovery_mode": "engine",
+    "engine_socket": "127.0.0.1:49153"
+  }
+}

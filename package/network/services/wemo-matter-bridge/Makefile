@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wemo-matter-bridge
-PKG_RELEASE:=10
+PKG_RELEASE:=11
 
 PKG_SOURCE_URL:=https://github.com/jolie1204/connectedhomeip.git
 PKG_SOURCE_PROTO:=git-with-metadata
@@ -22,8 +22,6 @@ HAVE_PY311:=$(shell $(STAGING_DIR_HOST)/bin/$(PYTHON) -c 'import sys; print(sys.
 PKG_BUILD_DEPENDS:=gn/host $(if $(HAVE_PY311),,python3-host-ssl/host)
 PKG_BUILD_PARALLEL:=1
 
-LOCAL_WEMO_SOURCE_DIR:=$(TOPDIR)/../sources/wemo-matter-bridge
-
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/git-with-metadata.mk
 
@@ -32,7 +30,7 @@ define Package/wemo-matter-bridge
   CATEGORY:=Network
   SUBMENU:=Matter
   TITLE:=WeMo Matter bridge
-  URL:=https://github.com/jolie1204/wemo-matter-bridge
+  URL:=https://github.com/jolie1204/openwrt-wemo-matter-bridge
   DEPENDS:=+libstdcpp +libatomic +libpthread +libmbedtls +libsqlite3 +libupnp +openwemo-bridge-core +wemo-mtd-data
 endef
 
@@ -74,15 +72,11 @@ APP_DIR:=$(PKG_BUILD_DIR)/examples/wemo-bridge-app
 
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	[ -f "$(LOCAL_WEMO_SOURCE_DIR)/matter-bridge-app/main.cpp" ] || { \
-		echo "ERROR: missing local source at $(LOCAL_WEMO_SOURCE_DIR)"; \
-		exit 1; \
-	}
 	rm -rf $(APP_DIR)
 	mkdir -p $(APP_DIR)/linux
-	$(CP) $(LOCAL_WEMO_SOURCE_DIR)/matter-bridge-app/. $(APP_DIR)/linux/
-	$(CP) $(LOCAL_WEMO_SOURCE_DIR)/include $(APP_DIR)/
-	$(CP) $(LOCAL_WEMO_SOURCE_DIR)/src $(APP_DIR)/
+	$(CP) ./app-src/matter-bridge-app/. $(APP_DIR)/linux/
+	$(CP) ./app-src/include $(APP_DIR)/
+	$(CP) ./app-src/src $(APP_DIR)/
 	rm -f $(APP_DIR)/linux/connectedhomeip $(APP_DIR)/linux/third_party
 	ln -s ../../.. $(APP_DIR)/linux/connectedhomeip
 	ln -s connectedhomeip/third_party $(APP_DIR)/linux/third_party

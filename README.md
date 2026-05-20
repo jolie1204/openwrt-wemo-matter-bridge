@@ -13,8 +13,8 @@ bridge with a self-contained OpenWrt image.
 This fork adds Wemo bridge specific behavior on top of upstream OpenWrt:
 
 - `wemo-matter-bridge` target profile for the Belkin MT7628 bridge hardware
-- `openwemo-bridge-core` package from local sibling sources
-- `wemo-matter-bridge` package from local sibling sources
+- native `openwemo-bridge-core` package with source vendored in this tree
+- native `wemo-matter-bridge` package with source vendored in this tree
 - `wemo-mtd-data` package to mount the `data` MTD partition at `/data`
 - Matter and OpenWeMo state persistence under `/data/wemo-matter`
 - built-in WireGuard tools for remote management
@@ -125,33 +125,31 @@ There is no destructive reset action bound to the front button. These front
 panel mappings are specific to the Belkin MT7628 bridge hardware; Raspberry Pi
 profiles do not provide the same LED/button layout.
 
-## Local source dependencies
+## Vendored package sources
 
-This tree expects sibling source repositories under `../sources`:
+The Wemo application sources are vendored into this repository so the custom
+packages can be built from a clean checkout of this OpenWrt tree:
 
-- `../sources/openwemo-bridge-core`
-- `../sources/wemo-matter-bridge`
+- `package/network/services/openwemo-bridge-core/src`
+- `package/network/services/wemo-matter-bridge/app-src`
 
-The OpenWrt packages copy sources from those directories during build. If they
-are missing, the package build will fail by design.
+The package Makefiles copy from those in-tree source directories during
+`Build/Prepare`. The build still uses normal OpenWrt feeds and package source
+downloads for upstream dependencies.
 
-For the current working build, the OpenWrt tree was checked out from:
+Current vendored source baselines:
 
-```text
-https://github.com/jolie1204/openwrt-wemo-matter-bridge
-```
+- `openwemo-bridge-core`: `9e7b63d7eb91198fd1b7a19b2c143a94f4031988`
+- `wemo-matter-bridge`: `6b67d791dd3e1c9f1b683653ed08ea6dc275cd9c`
 
-The sibling package sources were checked out from:
-
-```text
-https://github.com/jolie1204/openwemo-bridge-core
-https://github.com/jolie1204/wemo-matter-bridge
-```
+The former standalone source repositories are no longer required as sibling
+checkouts for normal firmware builds.
 
 ## Current build status
 
-As of the latest local build, the 16 MiB `wemo-matter-bridge` profile builds
-successfully end to end for `ramips/mt76x8`.
+As of the latest local build before vendoring the package sources, the 16 MiB
+`wemo-matter-bridge` profile built successfully end to end for `ramips/mt76x8`.
+Rebuild the image after source changes to refresh artifact hashes.
 
 The selected target is:
 
@@ -174,21 +172,21 @@ bin/targets/ramips/mt76x8/openwrt-ramips-mt76x8-wemo-matter-bridge-initramfs-ker
 bin/targets/ramips/mt76x8/openwrt-ramips-mt76x8-wemo-matter-bridge-squashfs-sysupgrade.bin
 ```
 
-Current hashes from the completed build:
+Hashes from that completed build:
 
 ```text
 92f01e0bbfa640f04acb11bf743e7b3367ec4cd6b7fbdcb434ec058c6e2eba16  openwrt-ramips-mt76x8-wemo-matter-bridge-initramfs-kernel.bin
 55e6cad640263759355fc648f519d8f249f265b16762987d038349a3d39a17e1  openwrt-ramips-mt76x8-wemo-matter-bridge-squashfs-sysupgrade.bin
 ```
 
-The package outputs were also generated:
+The package outputs from that build were:
 
 ```text
 bin/packages/mipsel_24kc/base/openwemo-bridge-core-0.1-r10.apk
 bin/packages/mipsel_24kc/base/wemo-matter-bridge-2025.12.01~8effa808-r10.apk
 ```
 
-The `wemo-matter-bridge` package hash from this build is:
+The `wemo-matter-bridge` package hash from that build was:
 
 ```text
 71bd3f97c9c7f14d23e70c767f4869f4893fb575faf5ef3e7cd3a70f231e60ae  wemo-matter-bridge-2025.12.01~8effa808-r10.apk
@@ -219,18 +217,17 @@ Matter bridge firmware on the current OpenWrt base:
 - `package/network/services/openwemo-bridge-core/patches/002-health-snapshot-fallback.patch`
   - fixed the health snapshot fallback to use the existing Wemo device database
     and `GlobalDeviceList` instead of non-existent list APIs
-- `package/network/services/openwemo-bridge-core/patches/003-libupnp-init2-signature.patch`
-  - updated the `UpnpInit2` call for the libupnp headers used by OpenWrt
-- `package/network/services/openwemo-bridge-core/patches/004-add-device-list-api.patch`
-  - added `we_list_devices()` and exported `struct we_device_list` /
-    `struct we_device_info`, which are required by the Matter bridge's
-    OpenWeMo adapter
+- `package/network/services/openwemo-bridge-core/src`
+  - now carries the `UpnpInit2(ifname, port)` call expected by OpenWrt's
+    libupnp headers
+  - now carries the IPC-backed `we_list_devices()` API and exported
+    `struct we_device_list` / `struct we_device_info`, which are required by
+    the Matter bridge's OpenWeMo adapter
 
 The key integration issue was that `wemo-matter-bridge` expected a device list
-API from `openwemo-bridge-core`, but the local core source did not provide it.
-The added `we_list_devices()` implementation reads the OpenWeMo device database
-and state database, then returns a bounded list of devices for the Matter bridge
-adapter.
+API from `openwemo-bridge-core`. The vendored `we_list_devices()`
+implementation asks `wemo_ctrl` over IPC for the current device list and returns
+a bounded list of devices for the Matter bridge adapter.
 
 A later runtime issue made Google Home show the Matter bridge but hide the child
 Wemo devices. The Matter fabric and pairing data were still present under
@@ -450,10 +447,10 @@ For generic OpenWrt source and history, see upstream:
 
 - https://github.com/openwrt/openwrt
 
-## Related repositories
+## Related source packages
 
-- `openwemo-bridge-core`: local WeMo discovery/control daemon and client
-- `wemo-matter-bridge`: Matter bridge application sources
+- `package/network/services/openwemo-bridge-core`: local WeMo discovery/control daemon and client
+- `package/network/services/wemo-matter-bridge`: Matter bridge application sources
 
 ## License
 
