@@ -44,7 +44,7 @@
 #include "wemo_device_db.h"
 #include "logger.h"
 
-#define WEMO_DEVICE_ENTRIES 11
+#define WEMO_DEVICE_ENTRIES 13
 #define STATE_ENTRIES 4
 #define STATE_CACHE_MAX_ENTRIES 512
 #define STATE_CACHE_DEFAULT_FLUSH_MS 2000
@@ -314,6 +314,39 @@ static void wemo_dev_db_ensure_last_seen_column(sqlite3 *dev_db)
                       &errmsg);
     if (rc != SQLITE_OK) {
         LOG_ERROR_MSG("failed to initialize last_seen values: %s", errmsg ? errmsg : "unknown error");
+    }
+    if (errmsg != NULL) {
+        sqlite3_free(errmsg);
+    }
+}
+
+static void wemo_dev_db_ensure_retired_columns(sqlite3 *dev_db)
+{
+    char *errmsg = NULL;
+    int rc;
+
+    rc = sqlite3_exec(dev_db, "ALTER TABLE wemo_device ADD COLUMN retired INTEGER NOT NULL DEFAULT 0;", NULL, NULL, &errmsg);
+    if (rc == SQLITE_OK) {
+        LOG_DEBUG_MSG("wemo_device schema updated: added retired column");
+    } else if (errmsg != NULL && strstr(errmsg, "duplicate column name") != NULL) {
+        sqlite3_free(errmsg);
+        errmsg = NULL;
+    } else {
+        LOG_ERROR_MSG("failed to add retired column to wemo_device: %s", errmsg ? errmsg : "unknown error");
+        if (errmsg != NULL) {
+            sqlite3_free(errmsg);
+        }
+        return;
+    }
+
+    rc = sqlite3_exec(dev_db, "ALTER TABLE wemo_device ADD COLUMN retired_at INTEGER NOT NULL DEFAULT 0;", NULL, NULL, &errmsg);
+    if (rc == SQLITE_OK) {
+        LOG_DEBUG_MSG("wemo_device schema updated: added retired_at column");
+    } else if (errmsg != NULL && strstr(errmsg, "duplicate column name") != NULL) {
+        sqlite3_free(errmsg);
+        errmsg = NULL;
+    } else {
+        LOG_ERROR_MSG("failed to add retired_at column to wemo_device: %s", errmsg ? errmsg : "unknown error");
     }
     if (errmsg != NULL) {
         sqlite3_free(errmsg);
@@ -595,6 +628,8 @@ int wemo_dev_db_init(sqlite3 **dev_db, sqlite3 **state_db)
 			{"manufacturer", "VARCHAR(45)"},
 			{"ipaddr", "VARCHAR(64)"},
 			{"last_seen", "INTEGER NOT NULL DEFAULT 0"},
+			{"retired", "INTEGER NOT NULL DEFAULT 0"},
+			{"retired_at", "INTEGER NOT NULL DEFAULT 0"},
 			{"UNIQUE", "(UDN)"}
 	};
 
@@ -624,6 +659,7 @@ int wemo_dev_db_init(sqlite3 **dev_db, sqlite3 **state_db)
 
     wemo_dev_db_ensure_ipaddr_column(*dev_db);
     wemo_dev_db_ensure_last_seen_column(*dev_db);
+    wemo_dev_db_ensure_retired_columns(*dev_db);
 
     if(stat(wemo_state_db, &db_file) != -1) {
         LOG_DEBUG_MSG("wemo state db already exists");
@@ -731,46 +767,47 @@ static int wemo_dev_parse_version(char *firmware, char *UDN, char *version, int 
 
 void wemo_dev_db_insert(sqlite3 *db, struct wemoDevice *dev)
 {
-    // Add device to DB
-    ColDetails devParams[9];
-    ColDetails updateParams[8];
-    char condition[320];
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "INSERT INTO wemo_device "
+        "(UDN, device_type, friendly_name, firmware_version, serial_number, model_name, manufacturer, ipaddr, last_seen, retired, retired_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s','now') AS INTEGER), 0, 0) "
+        "ON CONFLICT(UDN) DO UPDATE SET "
+        "device_type = excluded.device_type, "
+        "friendly_name = excluded.friendly_name, "
+        "firmware_version = excluded.firmware_version, "
+        "serial_number = excluded.serial_number, "
+        "model_name = excluded.model_name, "
+        "manufacturer = excluded.manufacturer, "
+        "ipaddr = excluded.ipaddr, "
+        "last_seen = excluded.last_seen, "
+        "retired = 0, "
+        "retired_at = 0;";
     int type = 0;
     char version[12];
+    int rc;
 
     memset(version, 0, 12);
 
     if (wemo_dev_parse_version(dev->firmwareVersion, dev->UDN, version, &type)) {
-        sprintf(devParams[0].ColName, "%s","UDN");
-        snprintf(devParams[0].ColValue, sizeof(devParams[0].ColValue), "'%.*s'",
-                 (int)sizeof(devParams[0].ColValue) - 3, dev->UDN);
-        sprintf(devParams[1].ColName, "%s", "device_type");
-        sprintf(devParams[1].ColValue, "%d", type);
-        sprintf(devParams[2].ColName, "%s", "friendly_name");
-        snprintf(devParams[2].ColValue, sizeof(devParams[2].ColValue), "'%.*s'",
-                 (int)sizeof(devParams[2].ColValue) - 3, dev->FriendlyName);
-        sprintf(devParams[3].ColName, "%s", "firmware_version");
-        sprintf(devParams[3].ColValue, "\'%s\'", version);
-        sprintf(devParams[4].ColName, "%s", "serial_number");
-        snprintf(devParams[4].ColValue, sizeof(devParams[4].ColValue), "'%.*s'",
-                 (int)sizeof(devParams[4].ColValue) - 3, dev->serialNumber);
-        sprintf(devParams[5].ColName, "%s", "model_name");
-        snprintf(devParams[5].ColValue, sizeof(devParams[5].ColValue), "'%.*s'",
-                 (int)sizeof(devParams[5].ColValue) - 3, dev->modelName);
-        sprintf(devParams[6].ColName, "%s", "manufacturer");
-        snprintf(devParams[6].ColValue, sizeof(devParams[6].ColValue), "'%.*s'",
-                 (int)sizeof(devParams[6].ColValue) - 3, dev->manufacturer);
-        sprintf(devParams[7].ColName, "%s", "ipaddr");
-        snprintf(devParams[7].ColValue, sizeof(devParams[7].ColValue), "'%.*s'",
-                 (int)sizeof(devParams[7].ColValue) - 3, dev->ipaddr);
-        sprintf(devParams[8].ColName, "%s", "last_seen");
-        sprintf(devParams[8].ColValue, "CAST(strftime('%%s','now') AS INTEGER)");
-
-        if (WeMoDBInsertInTable(&db, "wemo_device", devParams, 9) == -1) {
-            memcpy(updateParams, &devParams[1], sizeof(updateParams));
-            snprintf(condition, sizeof(condition), "UDN='%s'", dev->UDN);
-            WeMoDBUpdateTable(&db, "wemo_device", updateParams, 8, condition);
+        rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+        if (rc != SQLITE_OK) {
+            LOG_ERROR_MSG("failed preparing device upsert: %s", sqlite3_errmsg(db));
+            return;
         }
+        sqlite3_bind_text(stmt, 1, dev->UDN, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 2, type);
+        sqlite3_bind_text(stmt, 3, dev->FriendlyName, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 4, version, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 5, dev->serialNumber, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 6, dev->modelName, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 7, dev->manufacturer, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 8, dev->ipaddr, -1, SQLITE_TRANSIENT);
+        rc = sqlite3_step(stmt);
+        if (rc != SQLITE_DONE) {
+            LOG_ERROR_MSG("failed upserting WEMO device UDN=%s: %s", dev->UDN, sqlite3_errmsg(db));
+        }
+        sqlite3_finalize(stmt);
     }
 }
 
@@ -779,7 +816,9 @@ int wemo_dev_db_update_last_seen(sqlite3 *db, int wemo_id)
     sqlite3_stmt *stmt = NULL;
     const char *sql =
         "UPDATE wemo_device "
-        "SET last_seen = CAST(strftime('%s','now') AS INTEGER) "
+        "SET last_seen = CAST(strftime('%s','now') AS INTEGER), "
+        "retired = 0, "
+        "retired_at = 0 "
         "WHERE wemo_id = ?;";
     int rc;
 
@@ -803,7 +842,10 @@ int wemo_dev_db_update_friendly_name(sqlite3 *db, int wemo_id, const char *frien
     sqlite3_stmt *stmt = NULL;
     const char *sql =
         "UPDATE wemo_device "
-        "SET friendly_name = ?, last_seen = CAST(strftime('%s','now') AS INTEGER) "
+        "SET friendly_name = ?, "
+        "last_seen = CAST(strftime('%s','now') AS INTEGER), "
+        "retired = 0, "
+        "retired_at = 0 "
         "WHERE wemo_id = ?;";
     int rc;
 
@@ -1091,14 +1133,21 @@ int wemo_dev_statedb_delete_row(sqlite3 *db, int wemo_id)
 int wemo_dev_db_prune_stale(sqlite3 *dev_db, sqlite3 *state_db, int stale_after_sec)
 {
     sqlite3_stmt *stmt = NULL;
+    sqlite3_stmt *retire_stmt = NULL;
     const char *sql =
         "SELECT wemo_id, UDN, friendly_name, last_seen "
         "FROM wemo_device "
         "WHERE last_seen > 0 "
+        "AND retired = 0 "
         "AND last_seen < CAST(strftime('%s','now') AS INTEGER) - ? "
         "ORDER BY last_seen ASC;";
+    const char *retire_sql =
+        "UPDATE wemo_device "
+        "SET retired = 1, "
+        "retired_at = CAST(strftime('%s','now') AS INTEGER) "
+        "WHERE wemo_id = ? AND retired = 0;";
     int rc;
-    int pruned = 0;
+    int retired = 0;
     int stale_ids[128];
     int stale_count = 0;
 
@@ -1120,7 +1169,7 @@ int wemo_dev_db_prune_stale(sqlite3 *dev_db, sqlite3 *state_db, int stale_after_
         const unsigned char *name = sqlite3_column_text(stmt, 2);
         int last_seen = sqlite3_column_int(stmt, 3);
 
-        LOG_INFO_MSG("Pruning stale WEMO device id=%d udn=%s name=%s last_seen=%d stale_after=%d",
+        LOG_INFO_MSG("Retiring stale WEMO device id=%d udn=%s name=%s last_seen=%d stale_after=%d",
                 wemo_id,
                 udn ? (const char *)udn : "",
                 name ? (const char *)name : "",
@@ -1134,16 +1183,31 @@ int wemo_dev_db_prune_stale(sqlite3 *dev_db, sqlite3 *state_db, int stale_after_
     }
     sqlite3_finalize(stmt);
 
+    rc = sqlite3_prepare_v2(dev_db, retire_sql, -1, &retire_stmt, NULL);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR_MSG("failed preparing stale device retire update: %s", sqlite3_errmsg(dev_db));
+        return 0;
+    }
+
     for (int i = 0; i < stale_count; i++) {
         int wemo_id = stale_ids[i];
-        if (!wemo_dev_statedb_delete_row(state_db, wemo_id)) {
-            LOG_WARN_MSG("failed deleting stale state rows for wemo_id=%d", wemo_id);
-        }
-        if (wemo_dev_db_delete_row(dev_db, wemo_id)) {
-            pruned++;
+        sqlite3_reset(retire_stmt);
+        sqlite3_clear_bindings(retire_stmt);
+        sqlite3_bind_int(retire_stmt, 1, wemo_id);
+        rc = sqlite3_step(retire_stmt);
+        if (rc == SQLITE_DONE) {
+            if (sqlite3_changes(dev_db) > 0) {
+                retired++;
+                if (state_db_upsert_online(state_db, wemo_id, 0) != DB_SUCCESS) {
+                    LOG_WARN_MSG("failed marking retired device offline for wemo_id=%d", wemo_id);
+                }
+                wemo_dev_statedb_update_online(state_db, wemo_id, 0);
+            }
         } else {
-            LOG_WARN_MSG("failed deleting stale device row for wemo_id=%d", wemo_id);
+            LOG_WARN_MSG("failed retiring stale device row for wemo_id=%d: %s",
+                    wemo_id, sqlite3_errmsg(dev_db));
         }
     }
-    return pruned;
+    sqlite3_finalize(retire_stmt);
+    return retired;
 }

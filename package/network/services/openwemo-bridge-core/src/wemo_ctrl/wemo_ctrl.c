@@ -2471,7 +2471,7 @@ void *wemoCtrlPointTimerLoop(void *args)
                 elapsed_since_gc = 0;
                 pruned = wemo_dev_db_prune_stale(ctrlpt_dev_db, ctrlpt_state_db, gc_after_sec);
                 if (pruned > 0) {
-                    LOG_INFO_MSG("Pruned %d stale WEMO device(s)", pruned);
+                    LOG_INFO_MSG("Retired %d stale WEMO device(s)", pruned);
                 }
             }
         }

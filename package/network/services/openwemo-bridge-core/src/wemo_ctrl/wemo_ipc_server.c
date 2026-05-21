@@ -434,7 +434,9 @@ static int wemo_ctrl_list_devices(struct we_device_list *out)
     sqlite3_busy_timeout(dev_db, 2000);
     rc = sqlite3_prepare_v2(dev_db,
         "SELECT wemo_id, UDN, device_type, friendly_name "
-        "FROM wemo_device ORDER BY wemo_id LIMIT ?;",
+        "FROM wemo_device "
+        "WHERE retired = 0 "
+        "ORDER BY wemo_id LIMIT ?;",
         -1, &dev_stmt, NULL);
     if (rc != SQLITE_OK) {
         sqlite3_close(dev_db);
