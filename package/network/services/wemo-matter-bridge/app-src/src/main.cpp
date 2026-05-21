@@ -43,11 +43,13 @@ int main(int argc, char ** argv)
         {
             const auto endpoint_id = registry.GetOrAssign(device.udn);
             std::cout << "udn=" << device.udn << " wemo_id=" << device.wemo_id
+                      << " type=" << device.device_type
                       << " endpoint=" << (endpoint_id.has_value() ? std::to_string(endpoint_id.value()) : "n/a")
                       << " online=" << (device.is_online ? "1" : "0")
                       << " onoff=" << static_cast<int>(device.onoff)
                       << " level=" << static_cast<int>(device.level_percent)
                       << " supports_level=" << (device.supports_level ? "1" : "0")
+                      << " is_plug=" << (device.is_plug ? "1" : "0")
                       << " name=\"" << device.friendly_name << "\""
                       << std::endl;
         }

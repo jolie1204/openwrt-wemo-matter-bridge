@@ -121,6 +121,8 @@ const int16_t initialMeasuredValue = 100;
 #define DEVICE_TYPE_LO_ON_OFF_LIGHT 0x0100
 // (taken from lo-devices.xml)
 #define DEVICE_TYPE_LO_DIMMABLE_LIGHT 0x0101
+// (taken from lo-devices.xml)
+#define DEVICE_TYPE_ON_OFF_PLUG_IN_UNIT 0x010A
 // (taken from matter-devices.xml)
 #define DEVICE_TYPE_POWER_SOURCE 0x0011
 // (taken from matter-devices.xml)
@@ -184,6 +186,7 @@ DECLARE_DYNAMIC_CLUSTER(OnOff::Id, onOffAttrs, ZAP_CLUSTER_MASK(SERVER), onOffIn
 
 // Declare Bridged Light endpoint
 DECLARE_DYNAMIC_ENDPOINT(bridgedLightEndpoint, bridgedLightClusters);
+DECLARE_DYNAMIC_ENDPOINT(bridgedOnOffPlugEndpoint, bridgedLightClusters);
 DataVersion gLight1DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
 DataVersion gLight2DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
 
@@ -258,6 +261,7 @@ struct BridgedWemoLight
     int wemo_id = 0;
     std::string udn;
     bool is_dimmable = false;
+    bool is_plug = false;
     std::unique_ptr<Device> device;  // DeviceOnOff or DeviceDimmable
     std::array<DataVersion, kMaxBridgedClusters> dataVersions {};
 
@@ -1012,6 +1016,9 @@ void runOnOffRoomAction(Room * room, bool actionOn, EndpointId endpointId, uint1
 const EmberAfDeviceType gBridgedOnOffDeviceTypes[] = { { DEVICE_TYPE_LO_ON_OFF_LIGHT, DEVICE_VERSION_DEFAULT },
                                                        { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT } };
 
+const EmberAfDeviceType gBridgedOnOffPlugDeviceTypes[] = { { DEVICE_TYPE_ON_OFF_PLUG_IN_UNIT, DEVICE_VERSION_DEFAULT },
+                                                           { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT } };
+
 const EmberAfDeviceType gBridgedDimmableDeviceTypes[] = { { DEVICE_TYPE_LO_DIMMABLE_LIGHT, DEVICE_VERSION_DEFAULT },
                                                            { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT } };
 
@@ -1397,6 +1404,7 @@ void ApplicationInit()
         bridged.wemo_id = dev.wemo_id;
         bridged.udn = dev.udn;
         bridged.is_dimmable = dev.supports_level;
+        bridged.is_plug = dev.is_plug;
         const std::string name = dev.friendly_name.empty() ? std::string("WeMo Device") : dev.friendly_name;
 
         EmberAfEndpointType * epType;
@@ -1415,6 +1423,17 @@ void ApplicationInit()
             deviceTypes = gBridgedDimmableDeviceTypes;
             deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedDimmableDeviceTypes);
             ChipLogProgress(DeviceLayer, "WeMo bind (dimmable): %s <- %s", name.c_str(), bridged.udn.c_str());
+        }
+        else if (dev.is_plug)
+        {
+            auto plug = std::make_unique<DeviceOnOff>(name.c_str(), "WeMo");
+            plug->SetOnOff(dev.onoff != 0);
+            plug->SetReachable(dev.is_online);
+            bridged.device = std::move(plug);
+            epType = &bridgedOnOffPlugEndpoint;
+            deviceTypes = gBridgedOnOffPlugDeviceTypes;
+            deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedOnOffPlugDeviceTypes);
+            ChipLogProgress(DeviceLayer, "WeMo bind (plug): %s <- %s", name.c_str(), bridged.udn.c_str());
         }
         else
         {

@@ -28,8 +28,11 @@ namespace wemo_bridge {
 
 namespace {
 
-// WEMO_DIMMER = 4 from wemo_engine.h dev_id_t enum
-constexpr int kTypeDimmer = 4;
+// Values from wemo_engine.h dev_id_t enum.
+constexpr int kTypeSwitch  = 1;
+constexpr int kTypeMini    = 3;
+constexpr int kTypeDimmer  = 4;
+constexpr int kTypeInsight = 5;
 
 #if HAVE_OPENWEMO_ENGINE
 void MaybeConfigureIpcTarget(const std::string & engine_socket)
@@ -146,6 +149,7 @@ std::vector<WemoDevice> WemoAdapterOpenWemo::Discover()
 
         WemoDevice device;
         device.wemo_id       = info.wemo_id;
+        device.device_type   = info.device_type;
         device.udn           = info.udn;
         device.friendly_name = info.friendly_name;
         device.is_online     = (info.is_online != 0);
@@ -153,6 +157,8 @@ std::vector<WemoDevice> WemoAdapterOpenWemo::Discover()
         // Some firmware reports a generic device_type even for dimmers but
         // still provides a valid level (0-100).
         device.supports_level = (info.device_type == kTypeDimmer) || (info.level >= 0);
+        device.is_plug        = (info.device_type == kTypeSwitch) || (info.device_type == kTypeMini) ||
+            (info.device_type == kTypeInsight);
         if (info.level >= 0)
         {
             device.level_percent = static_cast<uint8_t>(std::clamp(info.level, 0, 100));
