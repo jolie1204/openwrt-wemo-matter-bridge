@@ -128,6 +128,29 @@ struct wemoDeviceNode *GlobalDeviceList = NULL;
 static char serial_number[32] = {0};
 static char DeviceUDN[64] = {0};
 
+#define WEMO_STATE_REFRESH_MAX_DEVICES 128
+
+typedef struct {
+    int in_use;
+    int wemo_id;
+    int fail_count;
+    time_t next_allowed;
+} wemo_state_refresh_health_t;
+
+static ithread_mutex_t state_refresh_lock;
+static int state_refresh_lock_ready = 0;
+static ithread_t state_refresh_thread;
+static int state_refresh_thread_started = 0;
+static volatile int state_refresh_run = 0;
+static int state_refresh_startup_delay_sec = 20;
+static int state_refresh_interval_sec = 300;
+static int state_refresh_rate_ms = 1000;
+static int state_refresh_backoff_base_sec = 30;
+static int state_refresh_backoff_max_sec = 1800;
+static wemo_state_refresh_health_t state_refresh_health[WEMO_STATE_REFRESH_MAX_DEVICES];
+
+int wemoCtrlPointFindUDNfromCtrlUrl(const char *ctrlUrl, char *udn);
+
 static void wemo_copy_str(char *dst, size_t dst_size, const char *src, const char *field_name)
 {
     int written;
@@ -147,6 +170,339 @@ static void wemo_copy_str(char *dst, size_t dst_size, const char *src, const cha
     }
     if ((size_t)written >= dst_size) {
         LOG_ERROR_MSG("input truncated for %s", field_name ? field_name : "field");
+    }
+}
+
+static int wemo_parse_env_int(const char *name, int default_value, int min_value, int max_value)
+{
+    const char *env = getenv(name);
+    char *end = NULL;
+    long value;
+
+    if (env == NULL || env[0] == '\0') {
+        return default_value;
+    }
+
+    errno = 0;
+    value = strtol(env, &end, 10);
+    if (errno != 0 || end == env || *end != '\0') {
+        LOG_WARN_MSG("invalid %s=%s; using %d", name, env, default_value);
+        return default_value;
+    }
+    if (value < min_value || value > max_value) {
+        LOG_WARN_MSG("%s=%ld outside allowed range %d..%d; using %d",
+                name, value, min_value, max_value, default_value);
+        return default_value;
+    }
+
+    return (int)value;
+}
+
+static wemo_state_refresh_health_t *wemoStateRefreshHealthGetLocked(int wemo_id, int create)
+{
+    int free_slot = -1;
+    int i;
+
+    for (i = 0; i < WEMO_STATE_REFRESH_MAX_DEVICES; i++) {
+        if (state_refresh_health[i].in_use) {
+            if (state_refresh_health[i].wemo_id == wemo_id) {
+                return &state_refresh_health[i];
+            }
+        } else if (free_slot < 0) {
+            free_slot = i;
+        }
+    }
+
+    if (!create || free_slot < 0) {
+        return NULL;
+    }
+
+    memset(&state_refresh_health[free_slot], 0, sizeof(state_refresh_health[free_slot]));
+    state_refresh_health[free_slot].in_use = 1;
+    state_refresh_health[free_slot].wemo_id = wemo_id;
+    return &state_refresh_health[free_slot];
+}
+
+static int wemoStateRefreshBackoffDelay(int fail_count)
+{
+    int shift = fail_count - 1;
+    long delay = state_refresh_backoff_base_sec;
+
+    if (shift < 0) {
+        shift = 0;
+    }
+    if (shift > 5) {
+        shift = 5;
+    }
+
+    while (shift-- > 0 && delay < state_refresh_backoff_max_sec) {
+        delay *= 2;
+    }
+    if (delay > state_refresh_backoff_max_sec) {
+        delay = state_refresh_backoff_max_sec;
+    }
+    if (delay < 1) {
+        delay = 1;
+    }
+
+    return (int)delay;
+}
+
+static void wemoStateRefreshRecordResult(int wemo_id, int success)
+{
+    wemo_state_refresh_health_t *entry;
+    time_t now = time(NULL);
+
+    if (wemo_id <= 0 || !state_refresh_lock_ready) {
+        return;
+    }
+
+    ithread_mutex_lock(&state_refresh_lock);
+    entry = wemoStateRefreshHealthGetLocked(wemo_id, success ? 0 : 1);
+    if (entry != NULL) {
+        if (success) {
+            entry->fail_count = 0;
+            entry->next_allowed = 0;
+        } else {
+            int delay;
+
+            if (entry->fail_count < 30) {
+                entry->fail_count++;
+            }
+            delay = wemoStateRefreshBackoffDelay(entry->fail_count);
+            entry->next_allowed = now + delay;
+            LOG_WARN_MSG("state refresh backing off wemo_id=%d failures=%d delay=%ds",
+                    wemo_id, entry->fail_count, delay);
+        }
+    }
+    ithread_mutex_unlock(&state_refresh_lock);
+}
+
+static void wemoStateRefreshRecordCtrlUrlResult(const char *ctrlUrl, int success)
+{
+    char udn[NAME_SIZE] = {0};
+    int wemo_id;
+
+    if (ctrlUrl == NULL || !state_refresh_lock_ready || ctrlpt_dev_db == NULL) {
+        return;
+    }
+
+    if (wemoCtrlPointFindUDNfromCtrlUrl(ctrlUrl, udn) <= 0) {
+        return;
+    }
+
+    wemo_id = wemo_dev_db_retrieve_id(ctrlpt_dev_db, udn);
+    if (wemo_id > 0) {
+        wemoStateRefreshRecordResult(wemo_id, success);
+    }
+}
+
+static int wemoStateRefreshShouldPoll(int wemo_id, time_t now)
+{
+    wemo_state_refresh_health_t *entry;
+    int should_poll = 1;
+
+    if (wemo_id <= 0 || !state_refresh_lock_ready) {
+        return should_poll;
+    }
+
+    ithread_mutex_lock(&state_refresh_lock);
+    entry = wemoStateRefreshHealthGetLocked(wemo_id, 0);
+    if (entry != NULL && entry->next_allowed > now) {
+        should_poll = 0;
+    }
+    ithread_mutex_unlock(&state_refresh_lock);
+
+    return should_poll;
+}
+
+static int wemoStateRefreshLoadActiveIds(int *ids, int max_ids)
+{
+    static const char *sql =
+        "SELECT wemo_id FROM wemo_device WHERE retired = 0 ORDER BY wemo_id ASC;";
+    sqlite3_stmt *stmt = NULL;
+    int rc;
+    int count = 0;
+
+    if (ids == NULL || max_ids <= 0 || ctrlpt_dev_db == NULL) {
+        return 0;
+    }
+
+    rc = sqlite3_prepare_v2(ctrlpt_dev_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        LOG_WARN_MSG("failed to prepare state refresh device list: %s",
+                sqlite3_errmsg(ctrlpt_dev_db));
+        return 0;
+    }
+
+    while (count < max_ids) {
+        rc = sqlite3_step(stmt);
+        if (rc != SQLITE_ROW) {
+            break;
+        }
+        ids[count++] = sqlite3_column_int(stmt, 0);
+    }
+    if (rc == SQLITE_ROW) {
+        LOG_WARN_MSG("state refresh device list truncated at %d devices", max_ids);
+    } else if (rc != SQLITE_DONE) {
+        LOG_WARN_MSG("failed to read state refresh device list: %s",
+                sqlite3_errmsg(ctrlpt_dev_db));
+    }
+
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+static void wemoStateRefreshSleepMs(int total_ms)
+{
+    int elapsed = 0;
+
+    while (state_refresh_run && !wemoCtrlPointStopping && elapsed < total_ms) {
+        int step = total_ms - elapsed;
+
+        if (step > 250) {
+            step = 250;
+        }
+        if (step <= 0) {
+            break;
+        }
+        imillisleep(step);
+        elapsed += step;
+    }
+}
+
+static void *wemoStateRefreshLoop(void *args)
+{
+    int ids[WEMO_STATE_REFRESH_MAX_DEVICES];
+    time_t next_scan = time(NULL) + state_refresh_startup_delay_sec;
+    int first_scan = 1;
+
+    (void)args;
+
+    LOG_INFO_MSG("state refresh worker started: startup_delay=%ds interval=%ds rate=%dms backoff=%d..%ds",
+            state_refresh_startup_delay_sec,
+            state_refresh_interval_sec,
+            state_refresh_rate_ms,
+            state_refresh_backoff_base_sec,
+            state_refresh_backoff_max_sec);
+
+    while (state_refresh_run && !wemoCtrlPointStopping) {
+        time_t now = time(NULL);
+        int count;
+        int queued = 0;
+        int skipped = 0;
+        int failed = 0;
+        int i;
+
+        if (now < next_scan) {
+            wemoStateRefreshSleepMs(1000);
+            continue;
+        }
+
+        count = wemoStateRefreshLoadActiveIds(ids, WEMO_STATE_REFRESH_MAX_DEVICES);
+        LOG_INFO_MSG("%s state refresh scan started: devices=%d",
+                first_scan ? "startup" : "periodic", count);
+
+        for (i = 0; i < count && state_refresh_run && !wemoCtrlPointStopping; i++) {
+            struct we_state state_data;
+            int rc;
+
+            now = time(NULL);
+            if (!wemoStateRefreshShouldPoll(ids[i], now)) {
+                skipped++;
+                continue;
+            }
+
+            memset(&state_data, 0, sizeof(state_data));
+            state_data.is_online = -1;
+            state_data.state = -1;
+            state_data.level = -1;
+
+            rc = wemoCtrlPointRetrieveState(ids[i], &state_data);
+            if (rc == CTRLPT_SUCCESS) {
+                queued++;
+            } else {
+                failed++;
+                wemoStateRefreshRecordResult(ids[i], 0);
+            }
+
+            if (i + 1 < count) {
+                wemoStateRefreshSleepMs(state_refresh_rate_ms);
+            }
+        }
+
+        LOG_INFO_MSG("%s state refresh scan completed: queued=%d skipped_backoff=%d failed=%d",
+                first_scan ? "startup" : "periodic", queued, skipped, failed);
+        first_scan = 0;
+        if (state_refresh_interval_sec <= 0) {
+            break;
+        }
+        next_scan = time(NULL) + state_refresh_interval_sec;
+    }
+
+    LOG_INFO_MSG("state refresh worker stopped");
+    return NULL;
+}
+
+static void wemoStateRefreshStart(void)
+{
+    int enabled;
+    int rc;
+
+    if (state_refresh_thread_started) {
+        return;
+    }
+
+    enabled = wemo_parse_env_int("WEMO_STATE_REFRESH", 1, 0, 1);
+    state_refresh_startup_delay_sec =
+        wemo_parse_env_int("WEMO_STATE_REFRESH_STARTUP_DELAY_SEC", 20, 0, 3600);
+    state_refresh_interval_sec =
+        wemo_parse_env_int("WEMO_STATE_REFRESH_INTERVAL_SEC", 300, 0, 86400);
+    state_refresh_rate_ms =
+        wemo_parse_env_int("WEMO_STATE_REFRESH_RATE_MS", 1000, 100, 60000);
+    state_refresh_backoff_base_sec =
+        wemo_parse_env_int("WEMO_STATE_REFRESH_BACKOFF_BASE_SEC", 30, 1, 3600);
+    state_refresh_backoff_max_sec =
+        wemo_parse_env_int("WEMO_STATE_REFRESH_BACKOFF_MAX_SEC", 1800, 1, 86400);
+    if (state_refresh_backoff_max_sec < state_refresh_backoff_base_sec) {
+        state_refresh_backoff_max_sec = state_refresh_backoff_base_sec;
+    }
+
+    if (!enabled) {
+        LOG_INFO_MSG("state refresh worker disabled by WEMO_STATE_REFRESH=0");
+        return;
+    }
+
+    if (!state_refresh_lock_ready) {
+        rc = ithread_mutex_init(&state_refresh_lock, 0);
+        if (rc != 0) {
+            LOG_ERROR_MSG("failed to initialize state refresh lock: %d", rc);
+            return;
+        }
+        state_refresh_lock_ready = 1;
+    }
+
+    ithread_mutex_lock(&state_refresh_lock);
+    memset(state_refresh_health, 0, sizeof(state_refresh_health));
+    ithread_mutex_unlock(&state_refresh_lock);
+
+    state_refresh_run = 1;
+    rc = ithread_create(&state_refresh_thread, NULL, wemoStateRefreshLoop, NULL);
+    if (rc != 0) {
+        state_refresh_run = 0;
+        LOG_ERROR_MSG("failed to start state refresh worker: %d", rc);
+        return;
+    }
+
+    state_refresh_thread_started = 1;
+}
+
+static void wemoStateRefreshStop(void)
+{
+    state_refresh_run = 0;
+    if (state_refresh_thread_started) {
+        ithread_join(state_refresh_thread, NULL);
+        state_refresh_thread_started = 0;
     }
 }
 
@@ -2127,23 +2483,25 @@ int wemoCtrlPointCallbackEventHandler(Upnp_EventType EventType, void *Event, voi
 		break;
 	}
 
-	/* SOAP Stuff */
-	case UPNP_CONTROL_ACTION_COMPLETE: {
-	    UpnpActionComplete *a_event = (UpnpActionComplete *)Event;
-	    int errCode = UpnpActionComplete_get_ErrCode(a_event);
-	    if (errCode != UPNP_E_SUCCESS) {
-                const char *ctrlUrl = UpnpActionComplete_get_CtrlUrl_cstr(a_event);
-                char udn[NAME_SIZE];
+		/* SOAP Stuff */
+		case UPNP_CONTROL_ACTION_COMPLETE: {
+			UpnpActionComplete *a_event = (UpnpActionComplete *)Event;
+			int errCode = UpnpActionComplete_get_ErrCode(a_event);
+			const char *ctrlUrl = UpnpActionComplete_get_CtrlUrl_cstr(a_event);
 
-                LOG_DEBUG_MSG("Error in  Action Complete Callback -- %d", errCode);
-            if (wemoCtrlPointFindUDNfromCtrlUrl(ctrlUrl, udn) != -1) {
-                LOG_DEBUG_MSG("Found problem on device UDN -- %s", udn);
-                wemoCtrlPointRefresh();
-            }
-        }
-        else {
-            wemoCtrlPointHandleActionComplete(a_event);
-        }
+			if (errCode != UPNP_E_SUCCESS) {
+				char udn[NAME_SIZE];
+
+				LOG_DEBUG_MSG("Error in  Action Complete Callback -- %d", errCode);
+				wemoStateRefreshRecordCtrlUrlResult(ctrlUrl, 0);
+				if (wemoCtrlPointFindUDNfromCtrlUrl(ctrlUrl, udn) > 0) {
+					LOG_DEBUG_MSG("Found problem on device UDN -- %s", udn);
+					wemoCtrlPointRefresh();
+				}
+			} else {
+				wemoStateRefreshRecordCtrlUrlResult(ctrlUrl, 1);
+				wemoCtrlPointHandleActionComplete(a_event);
+			}
 		/* No need for any processing here, just print out results.
 		 * Service state table updates are handled by events. */
 
@@ -2621,6 +2979,7 @@ int wemoCtrlPointStart(char *ifname, print_string printFunctionPtr, state_update
 	/* start a timer thread */
 	ithread_create(&timer_thread, NULL, wemoCtrlPointTimerLoop, NULL);
 	ithread_detach(timer_thread);
+	wemoStateRefreshStart();
 
 	return CTRLPT_SUCCESS;
 }
@@ -2628,6 +2987,7 @@ int wemoCtrlPointStart(char *ifname, print_string printFunctionPtr, state_update
 int wemoCtrlPointStop(void)
 {
     wemoCtrlPointStopping = 1;
+    wemoStateRefreshStop();
     wemoTakeDiscoverRequest();
 	wemoCtrlPointTimerLoopRun = 0;
 	wemoCtrlPointRemoveAll();
