@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openwemo-bridge-core
 PKG_VERSION:=0.1
-PKG_RELEASE:=13
+PKG_RELEASE:=14
 
 PKG_LICENSE:=BSD-3-Clause
 PKG_BUILD_PARALLEL:=1

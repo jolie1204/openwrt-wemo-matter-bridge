@@ -44,7 +44,7 @@
 #include "wemo_device_db.h"
 #include "logger.h"
 
-#define WEMO_DEVICE_ENTRIES 10
+#define WEMO_DEVICE_ENTRIES 11
 #define STATE_ENTRIES 4
 #define STATE_CACHE_MAX_ENTRIES 512
 #define STATE_CACHE_DEFAULT_FLUSH_MS 2000
@@ -281,6 +281,40 @@ static void wemo_dev_db_ensure_ipaddr_column(sqlite3 *dev_db)
     }
 
     LOG_ERROR_MSG("failed to add ipaddr column to wemo_device: %s", errmsg ? errmsg : "unknown error");
+    if (errmsg != NULL) {
+        sqlite3_free(errmsg);
+    }
+}
+
+static void wemo_dev_db_ensure_last_seen_column(sqlite3 *dev_db)
+{
+    char *errmsg = NULL;
+    int rc;
+
+    rc = sqlite3_exec(dev_db, "ALTER TABLE wemo_device ADD COLUMN last_seen INTEGER NOT NULL DEFAULT 0;", NULL, NULL, &errmsg);
+    if (rc == SQLITE_OK) {
+        LOG_DEBUG_MSG("wemo_device schema updated: added last_seen column");
+    } else if (errmsg != NULL && strstr(errmsg, "duplicate column name") != NULL) {
+        sqlite3_free(errmsg);
+        errmsg = NULL;
+    } else {
+        LOG_ERROR_MSG("failed to add last_seen column to wemo_device: %s", errmsg ? errmsg : "unknown error");
+        if (errmsg != NULL) {
+            sqlite3_free(errmsg);
+        }
+        return;
+    }
+
+    rc = sqlite3_exec(dev_db,
+                      "UPDATE wemo_device "
+                      "SET last_seen = CAST(strftime('%s','now') AS INTEGER) "
+                      "WHERE last_seen IS NULL OR last_seen = 0;",
+                      NULL,
+                      NULL,
+                      &errmsg);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR_MSG("failed to initialize last_seen values: %s", errmsg ? errmsg : "unknown error");
+    }
     if (errmsg != NULL) {
         sqlite3_free(errmsg);
     }
@@ -560,6 +594,7 @@ int wemo_dev_db_init(sqlite3 **dev_db, sqlite3 **state_db)
 			{"model_name", "VARCHAR(45)"},
 			{"manufacturer", "VARCHAR(45)"},
 			{"ipaddr", "VARCHAR(64)"},
+			{"last_seen", "INTEGER NOT NULL DEFAULT 0"},
 			{"UNIQUE", "(UDN)"}
 	};
 
@@ -588,6 +623,7 @@ int wemo_dev_db_init(sqlite3 **dev_db, sqlite3 **state_db)
     }
 
     wemo_dev_db_ensure_ipaddr_column(*dev_db);
+    wemo_dev_db_ensure_last_seen_column(*dev_db);
 
     if(stat(wemo_state_db, &db_file) != -1) {
         LOG_DEBUG_MSG("wemo state db already exists");
@@ -696,8 +732,8 @@ static int wemo_dev_parse_version(char *firmware, char *UDN, char *version, int 
 void wemo_dev_db_insert(sqlite3 *db, struct wemoDevice *dev)
 {
     // Add device to DB
-    ColDetails devParams[8];
-    ColDetails updateParams[7];
+    ColDetails devParams[9];
+    ColDetails updateParams[8];
     char condition[320];
     int type = 0;
     char version[12];
@@ -727,13 +763,64 @@ void wemo_dev_db_insert(sqlite3 *db, struct wemoDevice *dev)
         sprintf(devParams[7].ColName, "%s", "ipaddr");
         snprintf(devParams[7].ColValue, sizeof(devParams[7].ColValue), "'%.*s'",
                  (int)sizeof(devParams[7].ColValue) - 3, dev->ipaddr);
+        sprintf(devParams[8].ColName, "%s", "last_seen");
+        sprintf(devParams[8].ColValue, "CAST(strftime('%%s','now') AS INTEGER)");
 
-        if (WeMoDBInsertInTable(&db, "wemo_device", devParams, 8) == -1) {
+        if (WeMoDBInsertInTable(&db, "wemo_device", devParams, 9) == -1) {
             memcpy(updateParams, &devParams[1], sizeof(updateParams));
             snprintf(condition, sizeof(condition), "UDN='%s'", dev->UDN);
-            WeMoDBUpdateTable(&db, "wemo_device", updateParams, 7, condition);
+            WeMoDBUpdateTable(&db, "wemo_device", updateParams, 8, condition);
         }
     }
+}
+
+int wemo_dev_db_update_last_seen(sqlite3 *db, int wemo_id)
+{
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "UPDATE wemo_device "
+        "SET last_seen = CAST(strftime('%s','now') AS INTEGER) "
+        "WHERE wemo_id = ?;";
+    int rc;
+
+    if (db == NULL || wemo_id <= 0) {
+        return 0;
+    }
+
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR_MSG("failed preparing last_seen update: %s", sqlite3_errmsg(db));
+        return 0;
+    }
+    sqlite3_bind_int(stmt, 1, wemo_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE;
+}
+
+int wemo_dev_db_update_friendly_name(sqlite3 *db, int wemo_id, const char *friendly_name)
+{
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "UPDATE wemo_device "
+        "SET friendly_name = ?, last_seen = CAST(strftime('%s','now') AS INTEGER) "
+        "WHERE wemo_id = ?;";
+    int rc;
+
+    if (db == NULL || wemo_id <= 0 || friendly_name == NULL) {
+        return 0;
+    }
+
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR_MSG("failed preparing friendly_name update: %s", sqlite3_errmsg(db));
+        return 0;
+    }
+    sqlite3_bind_text(stmt, 1, friendly_name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, wemo_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE;
 }
 
 void wemo_dev_statedb_insert(sqlite3 *db, int id, int is_online, char *cap)
@@ -999,4 +1086,64 @@ int wemo_dev_statedb_delete_row(sqlite3 *db, int wemo_id)
     }
     pthread_mutex_unlock(&state_cache_lock);
     return 1;
+}
+
+int wemo_dev_db_prune_stale(sqlite3 *dev_db, sqlite3 *state_db, int stale_after_sec)
+{
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "SELECT wemo_id, UDN, friendly_name, last_seen "
+        "FROM wemo_device "
+        "WHERE last_seen > 0 "
+        "AND last_seen < CAST(strftime('%s','now') AS INTEGER) - ? "
+        "ORDER BY last_seen ASC;";
+    int rc;
+    int pruned = 0;
+    int stale_ids[128];
+    int stale_count = 0;
+
+    if (dev_db == NULL || state_db == NULL || stale_after_sec <= 0) {
+        return 0;
+    }
+
+    rc = sqlite3_prepare_v2(dev_db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR_MSG("failed preparing stale device prune query: %s", sqlite3_errmsg(dev_db));
+        return 0;
+    }
+    sqlite3_bind_int(stmt, 1, stale_after_sec);
+
+    while (stale_count < (int)(sizeof(stale_ids) / sizeof(stale_ids[0])) &&
+           (rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        int wemo_id = sqlite3_column_int(stmt, 0);
+        const unsigned char *udn = sqlite3_column_text(stmt, 1);
+        const unsigned char *name = sqlite3_column_text(stmt, 2);
+        int last_seen = sqlite3_column_int(stmt, 3);
+
+        LOG_INFO_MSG("Pruning stale WEMO device id=%d udn=%s name=%s last_seen=%d stale_after=%d",
+                wemo_id,
+                udn ? (const char *)udn : "",
+                name ? (const char *)name : "",
+                last_seen,
+                stale_after_sec);
+        stale_ids[stale_count++] = wemo_id;
+    }
+
+    if (rc != SQLITE_DONE) {
+        LOG_ERROR_MSG("stale device prune query failed: %s", sqlite3_errmsg(dev_db));
+    }
+    sqlite3_finalize(stmt);
+
+    for (int i = 0; i < stale_count; i++) {
+        int wemo_id = stale_ids[i];
+        if (!wemo_dev_statedb_delete_row(state_db, wemo_id)) {
+            LOG_WARN_MSG("failed deleting stale state rows for wemo_id=%d", wemo_id);
+        }
+        if (wemo_dev_db_delete_row(dev_db, wemo_id)) {
+            pruned++;
+        } else {
+            LOG_WARN_MSG("failed deleting stale device row for wemo_id=%d", wemo_id);
+        }
+    }
+    return pruned;
 }

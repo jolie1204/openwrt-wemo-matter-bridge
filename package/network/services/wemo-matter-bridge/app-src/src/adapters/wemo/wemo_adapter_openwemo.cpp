@@ -121,6 +121,20 @@ WemoAdapterOpenWemo::WemoAdapterOpenWemo(std::string engine_socket) : mEngineSoc
 
 std::vector<WemoDevice> WemoAdapterOpenWemo::Discover()
 {
+#if HAVE_OPENWEMO_ENGINE
+    if (!EnsureEngineInitialized(mEngineSocket))
+    {
+        return {};
+    }
+
+    (void) we_discover(0);
+#endif
+
+    return ListCachedDevices();
+}
+
+std::vector<WemoDevice> WemoAdapterOpenWemo::ListCachedDevices()
+{
     std::vector<WemoDevice> devices;
 
 #if HAVE_OPENWEMO_ENGINE
@@ -128,8 +142,6 @@ std::vector<WemoDevice> WemoAdapterOpenWemo::Discover()
     {
         return devices;
     }
-
-    (void) we_discover(0);
 
     struct we_device_list list {};
     const int rc = we_list_devices(&list);
@@ -347,6 +359,44 @@ bool WemoAdapterOpenWemo::SetLevelPercent(const std::string & udn, uint8_t perce
     }
 
     return false;
+#endif
+}
+
+bool WemoAdapterOpenWemo::SetFriendlyName(const std::string & udn, const std::string & name)
+{
+#if !HAVE_OPENWEMO_ENGINE
+    (void) udn;
+    (void) name;
+    return false;
+#else
+    if (!EnsureEngineInitialized(mEngineSocket))
+    {
+        return false;
+    }
+
+    auto resolveWemoId = [this](const std::string & key) -> int {
+        std::lock_guard<std::mutex> lock(mCacheMutex);
+        auto it = mUdnToWemoId.find(key);
+        return (it != mUdnToWemoId.end()) ? it->second : 0;
+    };
+
+    int wemoId = resolveWemoId(udn);
+    if (wemoId <= 0)
+    {
+        (void) we_discover(0);
+        (void) ListCachedDevices();
+        wemoId = resolveWemoId(udn);
+    }
+    if (wemoId <= 0)
+    {
+        return false;
+    }
+
+    struct we_name_change data {};
+    std::snprintf(data.name, sizeof(data.name), "%s", name.c_str());
+    const int rc = we_change_name(wemoId, &data);
+    std::fprintf(stderr, "wemo_adapter: change_name wemo_id=%d name=%s rc=%d\n", wemoId, data.name, rc);
+    return rc != 0;
 #endif
 }
 

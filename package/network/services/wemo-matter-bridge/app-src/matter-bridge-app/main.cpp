@@ -60,6 +60,7 @@
 #include <array>
 #include <cassert>
 #include <cinttypes>
+#include <cstring>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -248,11 +249,14 @@ DeviceOnOff ActionLight4("Action Light 4", "Room 2");
 // WeMo bridge adapter talking to wemo_ctrl/openwemo engine.
 wemo_bridge::WemoAdapterOpenWemo gWemoAdapter("127.0.0.1:49153");
 std::atomic_bool gWemoStatePollStarted { false };
+std::atomic_bool gWemoDeviceSyncStarted { false };
 
 // Max cluster count across both endpoint types for DataVersion storage.
 constexpr size_t kMaxBridgedClusters = MATTER_ARRAY_SIZE(bridgedDimmableLightClusters);
 constexpr int kDefaultWemoStatePollIntervalSec = 15;
 constexpr int kMinWemoStatePollIntervalSec = 5;
+constexpr int kDefaultWemoDeviceSyncIntervalSec = 30;
+constexpr int kMinWemoDeviceSyncIntervalSec = 10;
 constexpr int kDefaultWemoInitialDiscoveryWaitSec = 90;
 constexpr int kWemoInitialDiscoveryRetrySec = 2;
 
@@ -806,8 +810,17 @@ Protocols::InteractionModel::Status HandleWriteBridgedDeviceBasicAttribute(Devic
 
     std::string name(nameSpan.data(), nameSpan.size());
     dev->SetName(name.c_str());
+    dev->SetConfigurationVersion(dev->GetConfigurationVersion() + 1);
 
     HandleDeviceStatusChanged(dev, Device::kChanged_Name);
+    ScheduleReportingCallback(dev, BridgedDeviceBasicInformation::Id,
+                              BridgedDeviceBasicInformation::Attributes::ConfigurationVersion::Id);
+    auto udnIt = gWemoDeviceToUdn.find(dev);
+    if (udnIt != gWemoDeviceToUdn.end())
+    {
+        const std::string udn = udnIt->second;
+        std::thread([udn, name]() { gWemoAdapter.SetFriendlyName(udn, name); }).detach();
+    }
 
     return Protocols::InteractionModel::Status::Success;
 }
@@ -1344,6 +1357,315 @@ void StartWemoStatePolling()
     }).detach();
 }
 
+size_t ActiveWemoEndpointCount()
+{
+    size_t count = 0;
+    for (const auto & entry : gBridgedWemoLights)
+    {
+        if (entry.device)
+        {
+            count++;
+        }
+    }
+    return count;
+}
+
+void NotifyBridgePartsListChanged()
+{
+    MatterReportingAttributeChangeCallback(1, Descriptor::Id, Descriptor::Attributes::PartsList::Id);
+}
+
+bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList = true)
+{
+    const size_t endpointCapacity = CHIP_DEVICE_CONFIG_DYNAMIC_ENDPOINT_COUNT;
+    if (ActiveWemoEndpointCount() >= endpointCapacity)
+    {
+        ChipLogError(DeviceLayer, "Skipping WeMo device %s: dynamic endpoint capacity reached (%zu)", dev.friendly_name.c_str(),
+                     endpointCapacity);
+        return false;
+    }
+
+    BridgedWemoLight * slot = nullptr;
+    for (auto & entry : gBridgedWemoLights)
+    {
+        if (!entry.device)
+        {
+            slot = &entry;
+            break;
+        }
+    }
+    if (slot == nullptr)
+    {
+        if (gBridgedWemoLights.size() >= endpointCapacity)
+        {
+            return false;
+        }
+        gBridgedWemoLights.emplace_back();
+        slot = &gBridgedWemoLights.back();
+    }
+
+    *slot = BridgedWemoLight {};
+    slot->wemo_id = dev.wemo_id;
+    slot->udn = dev.udn;
+    slot->is_dimmable = dev.supports_level;
+    slot->is_plug = dev.is_plug;
+    const std::string name = dev.friendly_name.empty() ? std::string("WeMo Device") : dev.friendly_name;
+
+    EmberAfEndpointType * epType;
+    const EmberAfDeviceType * deviceTypes;
+    size_t deviceTypesCount;
+
+    if (dev.supports_level)
+    {
+        auto dimmer = std::make_unique<DeviceDimmable>(name.c_str(), "WeMo");
+        dimmer->SetOnOff(dev.onoff != 0);
+        dimmer->SetLevel(static_cast<uint8_t>(static_cast<uint16_t>(dev.level_percent) * 254u / 100u));
+        dimmer->SetReachable(dev.is_online);
+        slot->device = std::move(dimmer);
+        epType = &bridgedDimmableLightEndpoint;
+        deviceTypes = gBridgedDimmableDeviceTypes;
+        deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedDimmableDeviceTypes);
+        ChipLogProgress(DeviceLayer, "WeMo bind (dimmable): %s <- %s", name.c_str(), slot->udn.c_str());
+    }
+    else if (dev.is_plug)
+    {
+        auto plug = std::make_unique<DeviceOnOff>(name.c_str(), "WeMo");
+        plug->SetOnOff(dev.onoff != 0);
+        plug->SetReachable(dev.is_online);
+        slot->device = std::move(plug);
+        epType = &bridgedOnOffPlugEndpoint;
+        deviceTypes = gBridgedOnOffPlugDeviceTypes;
+        deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedOnOffPlugDeviceTypes);
+        ChipLogProgress(DeviceLayer, "WeMo bind (plug): %s <- %s", name.c_str(), slot->udn.c_str());
+    }
+    else
+    {
+        auto light = std::make_unique<DeviceOnOff>(name.c_str(), "WeMo");
+        light->SetOnOff(dev.onoff != 0);
+        light->SetReachable(dev.is_online);
+        slot->device = std::move(light);
+        epType = &bridgedLightEndpoint;
+        deviceTypes = gBridgedOnOffDeviceTypes;
+        deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedOnOffDeviceTypes);
+        ChipLogProgress(DeviceLayer, "WeMo bind (on/off): %s <- %s", name.c_str(), slot->udn.c_str());
+    }
+
+    const size_t clusterCount = slot->is_dimmable ? MATTER_ARRAY_SIZE(bridgedDimmableLightClusters) :
+                                                    MATTER_ARRAY_SIZE(bridgedLightClusters);
+
+#if !CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
+    const int addedIndex = AddDeviceEndpoint(slot->device.get(), epType, Span<const EmberAfDeviceType>(deviceTypes, deviceTypesCount),
+                                             Span<DataVersion>(slot->dataVersions.data(), clusterCount), 1);
+#else
+    std::string epUniqueId = slot->udn;
+    if (epUniqueId.rfind("uuid:", 0) == 0)
+    {
+        epUniqueId = epUniqueId.substr(5);
+    }
+    if (epUniqueId.size() > 32)
+    {
+        epUniqueId.resize(32);
+    }
+    CharSpan udnSpan(epUniqueId.c_str(), epUniqueId.size());
+    const int addedIndex = AddDeviceEndpoint(slot->device.get(), epType, Span<const EmberAfDeviceType>(deviceTypes, deviceTypesCount),
+                                             Span<DataVersion>(slot->dataVersions.data(), clusterCount), udnSpan, 1);
+#endif
+    if (addedIndex < 0)
+    {
+        ChipLogError(DeviceLayer, "Failed to publish WeMo device %s (udn=%s)", name.c_str(), slot->udn.c_str());
+        slot->device.reset();
+        slot->wemo_id = 0;
+        slot->udn.clear();
+        return false;
+    }
+
+    if (slot->is_dimmable)
+    {
+        emberAfLevelControlClusterServerInitCallback(slot->device->GetEndpointId());
+        static_cast<DeviceDimmable *>(slot->device.get())->SetChangeCallback(&HandleDeviceDimmableStatusChanged);
+    }
+    else
+    {
+        static_cast<DeviceOnOff *>(slot->device.get())->SetChangeCallback(&HandleDeviceOnOffStatusChanged);
+    }
+    gWemoDeviceToUdn[slot->device.get()] = slot->udn;
+    if (notifyPartsList)
+    {
+        NotifyBridgePartsListChanged();
+    }
+    return true;
+}
+
+void RemovePublishedWemoDevice(BridgedWemoLight & entry)
+{
+    if (!entry.device)
+    {
+        return;
+    }
+
+    ChipLogProgress(DeviceLayer, "Removing stale WeMo endpoint: %s <- %s", entry.device->GetName(), entry.udn.c_str());
+    gWemoDeviceToUdn.erase(entry.device.get());
+    RemoveDeviceEndpoint(entry.device.get());
+    entry.device.reset();
+    entry.wemo_id = 0;
+    entry.udn.clear();
+    entry.commandedOnOff = -1;
+    entry.commandedLevel = -1;
+    NotifyBridgePartsListChanged();
+}
+
+void UpdatePublishedWemoDevice(BridgedWemoLight & entry, const wemo_bridge::WemoDevice & dev)
+{
+    if (!entry.device)
+    {
+        return;
+    }
+
+    if (entry.is_dimmable != dev.supports_level || entry.is_plug != dev.is_plug)
+    {
+        RemovePublishedWemoDevice(entry);
+        return;
+    }
+
+    entry.wemo_id = dev.wemo_id;
+    const std::string name = dev.friendly_name.empty() ? std::string("WeMo Device") : dev.friendly_name;
+    if (std::strcmp(entry.device->GetName(), name.c_str()) != 0)
+    {
+        entry.device->SetName(name.c_str());
+        entry.device->SetConfigurationVersion(entry.device->GetConfigurationVersion() + 1);
+        HandleDeviceStatusChanged(entry.device.get(), Device::kChanged_Name);
+        ScheduleReportingCallback(entry.device.get(), BridgedDeviceBasicInformation::Id,
+                                  BridgedDeviceBasicInformation::Attributes::ConfigurationVersion::Id);
+        ChipLogProgress(DeviceLayer, "Updated WeMo Matter label: %s <- %s", name.c_str(), entry.udn.c_str());
+    }
+
+    if (entry.device->IsReachable() != dev.is_online)
+    {
+        entry.device->SetReachable(dev.is_online);
+    }
+    if (dev.is_online)
+    {
+        auto * onoff = static_cast<DeviceOnOff *>(entry.device.get());
+        const bool newOn = (dev.onoff != 0);
+        if (onoff->IsOn() != newOn)
+        {
+            onoff->SetOnOff(newOn);
+        }
+        if (entry.is_dimmable)
+        {
+            auto * dimmer = static_cast<DeviceDimmable *>(entry.device.get());
+            uint8_t matterLevel = static_cast<uint8_t>(static_cast<uint16_t>(dev.level_percent) * 254u / 100u);
+            if (dimmer->GetLevel() != matterLevel)
+            {
+                dimmer->SetLevel(matterLevel);
+            }
+        }
+    }
+}
+
+int GetWemoDeviceSyncIntervalSec()
+{
+    const char * env = std::getenv("WEMO_DEVICE_SYNC_INTERVAL_SEC");
+    if (env == nullptr || env[0] == '\0')
+    {
+        return kDefaultWemoDeviceSyncIntervalSec;
+    }
+
+    int interval = std::atoi(env);
+    if (interval < kMinWemoDeviceSyncIntervalSec)
+    {
+        interval = kMinWemoDeviceSyncIntervalSec;
+    }
+    return interval;
+}
+
+struct WemoDeviceListContext
+{
+    std::vector<wemo_bridge::WemoDevice> devices;
+};
+
+void ReconcileWemoDevicesOnMatterThread(intptr_t closure)
+{
+    auto * ctx = reinterpret_cast<WemoDeviceListContext *>(closure);
+    std::unordered_map<std::string, const wemo_bridge::WemoDevice *> discoveredByUdn;
+
+    for (const auto & dev : ctx->devices)
+    {
+        if (!dev.udn.empty())
+        {
+            discoveredByUdn[dev.udn] = &dev;
+        }
+    }
+
+    for (auto & entry : gBridgedWemoLights)
+    {
+        if (!entry.device)
+        {
+            continue;
+        }
+        auto it = discoveredByUdn.find(entry.udn);
+        if (it == discoveredByUdn.end())
+        {
+            RemovePublishedWemoDevice(entry);
+            continue;
+        }
+        UpdatePublishedWemoDevice(entry, *it->second);
+    }
+
+    for (const auto & dev : ctx->devices)
+    {
+        if (dev.udn.empty())
+        {
+            continue;
+        }
+        bool exists = false;
+        for (const auto & entry : gBridgedWemoLights)
+        {
+            if (entry.device && entry.udn == dev.udn)
+            {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists)
+        {
+            PublishWemoDevice(dev);
+        }
+    }
+
+    Platform::Delete(ctx);
+}
+
+void StartWemoDeviceSync()
+{
+    if (gWemoDeviceSyncStarted.exchange(true))
+    {
+        return;
+    }
+
+    const int intervalSec = GetWemoDeviceSyncIntervalSec();
+    std::thread([intervalSec]() {
+        ChipLogProgress(DeviceLayer, "WeMo device-list reconciliation interval=%ds", intervalSec);
+        while (true)
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(intervalSec));
+            auto devices = gWemoAdapter.ListCachedDevices();
+            if (devices.empty())
+            {
+                continue;
+            }
+            auto * ctx = Platform::New<WemoDeviceListContext>();
+            if (ctx == nullptr)
+            {
+                continue;
+            }
+            ctx->devices = std::move(devices);
+            TEMPORARY_RETURN_IGNORED PlatformMgr().ScheduleWork(ReconcileWemoDevicesOnMatterThread,
+                                                                reinterpret_cast<intptr_t>(ctx));
+        }
+    }).detach();
+}
+
 } // namespace
 
 void ApplicationInit()
@@ -1389,120 +1711,11 @@ void ApplicationInit()
 
     // Publish discovered WeMo lights up to dynamic endpoint capacity.
     const size_t endpointCapacity = CHIP_DEVICE_CONFIG_DYNAMIC_ENDPOINT_COUNT;
-    gBridgedWemoLights.reserve(std::min(discovered.size(), endpointCapacity));
+    gBridgedWemoLights.reserve(endpointCapacity);
 
     for (const auto & dev : discovered)
     {
-        if (gBridgedWemoLights.size() >= endpointCapacity)
-        {
-            ChipLogError(DeviceLayer, "Skipping WeMo device %s: dynamic endpoint capacity reached (%zu)", dev.friendly_name.c_str(),
-                         endpointCapacity);
-            continue;
-        }
-
-        BridgedWemoLight bridged;
-        bridged.wemo_id = dev.wemo_id;
-        bridged.udn = dev.udn;
-        bridged.is_dimmable = dev.supports_level;
-        bridged.is_plug = dev.is_plug;
-        const std::string name = dev.friendly_name.empty() ? std::string("WeMo Device") : dev.friendly_name;
-
-        EmberAfEndpointType * epType;
-        const EmberAfDeviceType * deviceTypes;
-        size_t deviceTypesCount;
-
-        if (dev.supports_level)
-        {
-            auto dimmer = std::make_unique<DeviceDimmable>(name.c_str(), "WeMo");
-            dimmer->SetOnOff(dev.onoff != 0);
-            // Seed level: WeMo 0-100 -> Matter 0-254
-            dimmer->SetLevel(static_cast<uint8_t>(static_cast<uint16_t>(dev.level_percent) * 254u / 100u));
-            dimmer->SetReachable(dev.is_online);
-            bridged.device = std::move(dimmer);
-            epType = &bridgedDimmableLightEndpoint;
-            deviceTypes = gBridgedDimmableDeviceTypes;
-            deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedDimmableDeviceTypes);
-            ChipLogProgress(DeviceLayer, "WeMo bind (dimmable): %s <- %s", name.c_str(), bridged.udn.c_str());
-        }
-        else if (dev.is_plug)
-        {
-            auto plug = std::make_unique<DeviceOnOff>(name.c_str(), "WeMo");
-            plug->SetOnOff(dev.onoff != 0);
-            plug->SetReachable(dev.is_online);
-            bridged.device = std::move(plug);
-            epType = &bridgedOnOffPlugEndpoint;
-            deviceTypes = gBridgedOnOffPlugDeviceTypes;
-            deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedOnOffPlugDeviceTypes);
-            ChipLogProgress(DeviceLayer, "WeMo bind (plug): %s <- %s", name.c_str(), bridged.udn.c_str());
-        }
-        else
-        {
-            auto light = std::make_unique<DeviceOnOff>(name.c_str(), "WeMo");
-            light->SetOnOff(dev.onoff != 0);
-            light->SetReachable(dev.is_online);
-            bridged.device = std::move(light);
-            epType = &bridgedLightEndpoint;
-            deviceTypes = gBridgedOnOffDeviceTypes;
-            deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedOnOffDeviceTypes);
-            ChipLogProgress(DeviceLayer, "WeMo bind (on/off): %s <- %s", name.c_str(), bridged.udn.c_str());
-        }
-
-        // Push into the vector BEFORE registering the endpoint.  The CHIP SDK
-        // stores the DataVersion span pointer for the lifetime of the endpoint,
-        // so it must point into the vector's heap storage (which was pre-reserved
-        // above) rather than into the stack-local `bridged` variable.
-        gBridgedWemoLights.push_back(std::move(bridged));
-        auto & stable = gBridgedWemoLights.back();
-
-        // DataVersion span size must match the cluster count for the endpoint type.
-        const size_t clusterCount = stable.is_dimmable
-            ? MATTER_ARRAY_SIZE(bridgedDimmableLightClusters)
-            : MATTER_ARRAY_SIZE(bridgedLightClusters);
-
-#if !CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
-        const int addedIndex = AddDeviceEndpoint(stable.device.get(), epType,
-                                                 Span<const EmberAfDeviceType>(deviceTypes, deviceTypesCount),
-                                                 Span<DataVersion>(stable.dataVersions.data(), clusterCount), 1);
-#else
-        // Use the WeMo UDN as the endpoint unique ID.  Strip the "uuid:"
-        // prefix to fit within the 32-byte buffer.  This gives each bridged
-        // device a stable identity that survives restarts.
-        std::string epUniqueId = stable.udn;
-        if (epUniqueId.rfind("uuid:", 0) == 0)
-        {
-            epUniqueId = epUniqueId.substr(5);
-        }
-        if (epUniqueId.size() > 32)
-        {
-            epUniqueId.resize(32);
-        }
-        CharSpan udnSpan(epUniqueId.c_str(), epUniqueId.size());
-        const int addedIndex = AddDeviceEndpoint(stable.device.get(), epType,
-                                                 Span<const EmberAfDeviceType>(deviceTypes, deviceTypesCount),
-                                                 Span<DataVersion>(stable.dataVersions.data(), clusterCount), udnSpan, 1);
-#endif
-        if (addedIndex < 0)
-        {
-            ChipLogError(DeviceLayer, "Failed to publish WeMo device %s (udn=%s)", name.c_str(), stable.udn.c_str());
-            gBridgedWemoLights.pop_back();
-            continue;
-        }
-
-        if (stable.is_dimmable)
-        {
-            // Dynamic endpoints don't get cluster init functions called
-            // automatically (DECLARE_DYNAMIC_CLUSTER passes NULL for the
-            // functions array).  Manually init the LevelControl server so
-            // its per-endpoint state (minLevel, maxLevel) is set up.
-            emberAfLevelControlClusterServerInitCallback(stable.device->GetEndpointId());
-
-            static_cast<DeviceDimmable *>(stable.device.get())->SetChangeCallback(&HandleDeviceDimmableStatusChanged);
-        }
-        else
-        {
-            static_cast<DeviceOnOff *>(stable.device.get())->SetChangeCallback(&HandleDeviceOnOffStatusChanged);
-        }
-        gWemoDeviceToUdn[stable.device.get()] = stable.udn;
+        PublishWemoDevice(dev, false);
     }
 
     // Receive state events from wemo_ctrl (called from wemo_engine IPC thread).
@@ -1522,6 +1735,7 @@ void ApplicationInit()
     // state events, so bridged devices come online quickly after startup.
     gWemoAdapter.Refresh();
     StartWemoStatePolling();
+    StartWemoDeviceSync();
 
     gRooms.clear();
     gActions.clear();

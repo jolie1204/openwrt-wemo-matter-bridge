@@ -10,6 +10,7 @@ NETWORK=lan
 DEFAULT_IFACE=br-lan
 WAIT_SECS=90
 READY_SETTLE_SECS=2
+DEVICE_GC_AFTER_SECS=86400
 
 resolve_ifname()
 {
@@ -70,6 +71,7 @@ start_service()
 	procd_set_param command /usr/sbin/wemo_ctrl
 	procd_set_param env WEMO_AUDIT_DB_PATH="$AUDIT_DB"
 	procd_set_param env WEMO_UPNP_IFNAME="$ifname"
+	procd_set_param env WEMO_DEVICE_GC_AFTER_SEC="$DEVICE_GC_AFTER_SECS"
 	procd_set_param stdout 1
 	procd_set_param stderr 1
 	procd_set_param respawn 3000 5 5

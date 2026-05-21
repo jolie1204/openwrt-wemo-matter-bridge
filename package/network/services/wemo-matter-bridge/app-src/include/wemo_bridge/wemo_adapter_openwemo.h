@@ -14,10 +14,12 @@ public:
     explicit WemoAdapterOpenWemo(std::string engine_socket);
 
     std::vector<WemoDevice> Discover() override;
+    std::vector<WemoDevice> ListCachedDevices();
     void Refresh() override;
     void PollStates();
     bool SetOnOff(const std::string & udn, bool on) override;
     bool SetLevelPercent(const std::string & udn, uint8_t percent) override;
+    bool SetFriendlyName(const std::string & udn, const std::string & name);
     void RegisterStateCallback(StateEventCallback cb) override;
 
 private:

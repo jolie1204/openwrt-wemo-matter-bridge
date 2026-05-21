@@ -317,7 +317,33 @@ void wemoCtrlPointAddDevice( IXML_Document *DescDoc,
         if( found ) {
             // The device is already there, so just update
             // the advertisement timeout field
+            int existing_wemo_id = 0;
+            int name_changed = 0;
             tmpdevnode->device.AdvrTimeOut = expires;
+            if (ctrlpt_util_retrieve_ip_from_url(location, ipaddr)) {
+                wemo_copy_str(tmpdevnode->device.ipaddr,
+                              sizeof(tmpdevnode->device.ipaddr),
+                              ipaddr,
+                              "ipaddr");
+            }
+            if (friendlyName != NULL && strcmp(tmpdevnode->device.FriendlyName, friendlyName) != 0) {
+                wemo_copy_str(tmpdevnode->device.FriendlyName,
+                              sizeof(tmpdevnode->device.FriendlyName),
+                              friendlyName,
+                              "FriendlyName");
+                name_changed = 1;
+            }
+            wemo_dev_db_insert(ctrlpt_dev_db, &(tmpdevnode->device));
+            existing_wemo_id = wemo_dev_db_retrieve_id(ctrlpt_dev_db, tmpdevnode->device.UDN);
+            if (existing_wemo_id) {
+                wemo_dev_statedb_update_online(ctrlpt_state_db, existing_wemo_id, 1);
+                if (name_changed) {
+                    struct we_name_change name_change;
+
+                    wemo_copy_str(name_change.name, sizeof(name_change.name), tmpdevnode->device.FriendlyName, "name_change.name");
+                    wemo_ipc_send_name_change(existing_wemo_id, &name_change);
+                }
+            }
             LOG_DEBUG_MSG("tmpdevnode->device.DescDocURL = %s, location = %s",
                     tmpdevnode->device.DescDocURL, location);
             if (strcmp(tmpdevnode->device.DescDocURL, location)) {
@@ -1474,6 +1500,8 @@ wemoStateUpdate( char *UDN,
                             }
                             /* update wemo_device DB */
                             if ((wemo_id = wemo_dev_db_retrieve_id(ctrlpt_dev_db, UDN))) {
+                                wemo_dev_db_update_last_seen(ctrlpt_dev_db, wemo_id);
+                                wemo_dev_statedb_update_online(ctrlpt_state_db, wemo_id, 1);
                                 if (!strcmp(variable->n.nodeName, "BinaryState")) {
                                     if (wemo_dev_db_get_capability(ctrlpt_state_db, wemo_id, CAP_BINARY) != atoi(State[j])) {
                                         wemo_dev_db_update_capability(ctrlpt_state_db, wemo_id, CAP_BINARY, atoi(State[j]));
@@ -1492,6 +1520,7 @@ wemoStateUpdate( char *UDN,
                                     struct we_name_change name_change;
 
                                     wemo_copy_str(name_change.name, sizeof(name_change.name), State[j], "name_change.name");
+                                    wemo_dev_db_update_friendly_name(ctrlpt_dev_db, wemo_id, name_change.name);
                                     LOG_DEBUG_MSG("call wemo_ipc_send_name_change: %s",
                                                       name_change.name);
                                     wemo_ipc_send_name_change(wemo_id, &name_change);
@@ -2374,8 +2403,12 @@ void *wemoCtrlPointTimerLoop(void *args)
     int elapsed_since_discover = 0;
     int discover_jitter_max = 15;
     int next_discover_due = discover_interval;
+    int gc_after_sec = 86400;
+    int gc_interval = 3600;
+    int elapsed_since_gc = 0;
     const char *env_interval = getenv("WEMO_DISCOVER_INTERVAL_SEC");
     const char *env_jitter = getenv("WEMO_DISCOVER_JITTER_SEC");
+    const char *env_gc = getenv("WEMO_DEVICE_GC_AFTER_SEC");
 
     srand((unsigned int)(time(NULL) ^ (unsigned int)getpid()));
 
@@ -2393,11 +2426,20 @@ void *wemoCtrlPointTimerLoop(void *args)
             discover_jitter_max = cfg_jitter;
         }
     }
+    if (env_gc != NULL && env_gc[0] != '\0') {
+        int cfg_gc = atoi(env_gc);
+        if (cfg_gc >= 0) {
+            gc_after_sec = cfg_gc;
+        }
+    }
     if (discover_interval > 0 && discover_jitter_max > 0) {
         next_discover_due = discover_interval + (rand() % (discover_jitter_max + 1));
     }
-    LOG_INFO_MSG("device maintenance timer started: timeout_check=%ds discover_interval=%ds discover_jitter_max=%ds",
-            incr, discover_interval, discover_jitter_max);
+    if (gc_after_sec > 0 && gc_interval > gc_after_sec) {
+        gc_interval = gc_after_sec;
+    }
+    LOG_INFO_MSG("device maintenance timer started: timeout_check=%ds discover_interval=%ds discover_jitter_max=%ds gc_after=%ds",
+            incr, discover_interval, discover_jitter_max, gc_after_sec);
 
     while (wemoCtrlPointTimerLoopRun) {
         isleep( incr );
@@ -2418,6 +2460,19 @@ void *wemoCtrlPointTimerLoop(void *args)
                 next_discover_due = discover_interval;
             }
             wemoCtrlPointRefresh();
+        }
+
+        if (gc_after_sec > 0) {
+            elapsed_since_gc += incr;
+            if (elapsed_since_gc >= gc_interval) {
+                int pruned;
+
+                elapsed_since_gc = 0;
+                pruned = wemo_dev_db_prune_stale(ctrlpt_dev_db, ctrlpt_state_db, gc_after_sec);
+                if (pruned > 0) {
+                    LOG_INFO_MSG("Pruned %d stale WEMO device(s)", pruned);
+                }
+            }
         }
     }
 
