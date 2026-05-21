@@ -2438,6 +2438,7 @@ void *wemoCtrlPointTimerLoop(void *args)
     if (gc_after_sec > 0 && gc_interval > gc_after_sec) {
         gc_interval = gc_after_sec;
     }
+    elapsed_since_gc = gc_interval;
     LOG_INFO_MSG("device maintenance timer started: timeout_check=%ds discover_interval=%ds discover_jitter_max=%ds gc_after=%ds",
             incr, discover_interval, discover_jitter_max, gc_after_sec);
 
