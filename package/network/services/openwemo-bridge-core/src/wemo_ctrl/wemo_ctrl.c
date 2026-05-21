@@ -150,6 +150,88 @@ static void wemo_copy_str(char *dst, size_t dst_size, const char *src, const cha
     }
 }
 
+static int wemoCtrlPointSubscribeAllEvents(void)
+{
+    static int subscribe_all = -1;
+    const char *env;
+
+    if (subscribe_all != -1) {
+        return subscribe_all;
+    }
+
+    env = getenv("WEMO_SUBSCRIBE_ALL_EVENTS");
+    subscribe_all = (env != NULL && env[0] != '\0' && atoi(env) != 0) ? 1 : 0;
+    if (subscribe_all) {
+        LOG_INFO_MSG("subscribing all WEMO event services due to WEMO_SUBSCRIBE_ALL_EVENTS");
+    }
+    return subscribe_all;
+}
+
+static int wemoCtrlPointIsInsightDevice(const struct wemoDeviceNode *deviceNode)
+{
+    if (deviceNode == NULL) {
+        return 0;
+    }
+    return (strcasestr(deviceNode->device.UDN, "insight") != NULL ||
+            strcasestr(deviceNode->device.modelName, "insight") != NULL);
+}
+
+static int wemoCtrlPointShouldSubscribeService(const struct wemoDeviceNode *deviceNode, int service)
+{
+    if (service == WEMO_SERVICE_BASICEVENT) {
+        return 1;
+    }
+    if (service == WEMO_SERVICE_INSIGHT && wemoCtrlPointIsInsightDevice(deviceNode)) {
+        return 1;
+    }
+    if (wemoCtrlPointSubscribeAllEvents()) {
+        return (service == WEMO_SERVICE_WIFISETUP ||
+                service == WEMO_SERVICE_FIRMWAREUPDATE ||
+                service == WEMO_SERVICE_RULES ||
+                service == WEMO_SERVICE_INSIGHT);
+    }
+    return 0;
+}
+
+static void wemoCtrlPointSubscribeDeviceEvents(struct wemoDeviceNode *deviceNode, int timeout)
+{
+    int service;
+
+    if (timeout <= 0) {
+        timeout = default_timeout;
+    }
+
+    for (service = 0; service < WEMO_SERVICE_COUNT; service++) {
+        int request_timeout = timeout;
+        int ret;
+
+        if (!wemoCtrlPointShouldSubscribeService(deviceNode, service)) {
+            continue;
+        }
+        if (deviceNode->device.wemoService[service].EventURL[0] == '\0') {
+            continue;
+        }
+
+        LOG_INFO_MSG("Subscribing to WEMO %s EventURL %s...",
+                wemoServiceName[service],
+                deviceNode->device.wemoService[service].EventURL);
+        ret = UpnpSubscribe(ctrlpt_handle,
+                            deviceNode->device.wemoService[service].EventURL,
+                            &request_timeout,
+                            deviceNode->device.wemoService[service].SID);
+
+        if (ret == UPNP_E_SUCCESS) {
+            LOG_INFO_MSG("Subscribed to WEMO %s EventURL with SID=%s",
+                    wemoServiceName[service],
+                    deviceNode->device.wemoService[service].SID);
+        } else {
+            LOG_INFO_MSG("Error Subscribing to WEMO %s EventURL -- %d",
+                    wemoServiceName[service],
+                    ret);
+        }
+    }
+}
+
 static void wemoCtrlPointPopulateServices(IXML_Document *DescDoc, const char *location, struct wemoDeviceNode *deviceNode)
 {
     int service;
@@ -377,27 +459,7 @@ void wemoCtrlPointAddDevice( IXML_Document *DescDoc,
                 /* update device node */
                 wemoCtrlPointPopulateServices(DescDoc, location, tmpdevnode);
 
-                /* subscribe to event with updated location */
-                for( service = 0; service < WEMO_SERVICE_COUNT; service++ ) {
-                    if ((service == WEMO_SERVICE_WIFISETUP) ||
-                        (service == WEMO_SERVICE_BASICEVENT) ||
-                        (service == WEMO_SERVICE_FIRMWAREUPDATE) ||
-                        (service == WEMO_SERVICE_RULES) ||
-                        (service == WEMO_SERVICE_INSIGHT)) {
-                        LOG_INFO_MSG("Subscribing to EventURL %s...", tmpdevnode->device.wemoService[service].EventURL);
-                        ret = UpnpSubscribe(ctrlpt_handle,
-                                            tmpdevnode->device.wemoService[service].EventURL,
-                                            &expires,
-                                            tmpdevnode->device.wemoService[service].SID);
-
-                        if( ret == UPNP_E_SUCCESS ) {
-                            LOG_INFO_MSG("Subscribed to EventURL with SID=%s",
-                                               tmpdevnode->device.wemoService[service].SID );
-                        } else {
-                            LOG_INFO_MSG("Error Subscribing to EventURL -- %d", ret );
-                        }
-                    }
-                }
+                wemoCtrlPointSubscribeDeviceEvents(tmpdevnode, expires);
             }
         } else {
             LOG_INFO_MSG("Found WEMO device: %s", location);
@@ -444,29 +506,7 @@ void wemoCtrlPointAddDevice( IXML_Document *DescDoc,
             //Notify New Device Added
             ctrlpt_util_StateUpdate(NULL, NULL, deviceNode->device.UDN,
                                      DEVICE_ADDED );
-            /* subscribe event */
-            for( service = 0; service < WEMO_SERVICE_COUNT; service++ ) {
-                if ((service == WEMO_SERVICE_WIFISETUP) ||
-                    (service == WEMO_SERVICE_BASICEVENT) ||
-                    (service == WEMO_SERVICE_FIRMWAREUPDATE) ||
-                    (service == WEMO_SERVICE_RULES) ||
-                    (service == WEMO_SERVICE_INSIGHT)) {
-                    //LOG_DEBUG_MSG("Subscribing to EventURL %s...", eventURL[service] );
-
-                    ret = UpnpSubscribe(ctrlpt_handle,
-                                        deviceNode->device.wemoService[service].EventURL,
-                                        &TimeOut,
-                                        deviceNode->device.wemoService[service].SID);
-
-                    if( ret == UPNP_E_SUCCESS ) {
-                        LOG_INFO_MSG("Subscribed to EventURL with SID=%s", 
-                                           deviceNode->device.wemoService[service].SID);
-                    } else {
-                        LOG_INFO_MSG("Error Subscribing to EventURL -- %d", ret );
-                    }
-
-                }
-            }
+            wemoCtrlPointSubscribeDeviceEvents(deviceNode, TimeOut);
             wemo_dev_db_insert(ctrlpt_dev_db, &(deviceNode->device));
 
             int id = 0;
