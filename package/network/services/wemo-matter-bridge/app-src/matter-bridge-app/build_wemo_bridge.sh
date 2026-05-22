@@ -63,7 +63,9 @@ build_bridge_app() {
   # too aggressive for 2 GB Raspberry Pi build hosts, so keep the same flow but
   # pass an explicit Ninja job limit when requested.
   # shellcheck disable=SC1091
+  set +u
   source "${CHIP_ROOT}/scripts/activate.sh"
+  set -u
 
   gn gen --check --fail-on-unused-args --root=. out/ethernet --args=""
   if [[ -n "$ninja_jobs" ]]; then
