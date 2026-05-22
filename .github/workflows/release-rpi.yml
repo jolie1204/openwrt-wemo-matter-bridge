@@ -54,7 +54,10 @@ jobs:
         env:
           JOBS: "2"
         run: |
-          target="${{ github.event.inputs.target || 'rpi4' }}"
+          target="${{ github.event.inputs.target || '' }}"
+          if [[ -z "$target" ]]; then
+            target="all"
+          fi
           args=(--target "$target")
           if [[ "${{ github.event.inputs.package_only || 'false' }}" == "true" ]]; then
             args+=(--package-only)
