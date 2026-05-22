@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TAG="${1:-}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
+GH_REPO="${GH_REPO:-jolie1204/openwrt-wemo-matter-bridge}"
 
 usage() {
   cat <<'EOF'
@@ -33,8 +34,8 @@ if [[ ! -d "$DIST_DIR" || -z "$(find "$DIST_DIR" -maxdepth 1 -type f -print -qui
   TAG="$TAG" "$ROOT_DIR/scripts/release/package_release_assets.sh"
 fi
 
-if [[ "$UPLOAD_ONLY" -eq 1 ]] || gh release view "$TAG" >/dev/null 2>&1; then
-  gh release upload "$TAG" "$DIST_DIR"/* --clobber
+if [[ "$UPLOAD_ONLY" -eq 1 ]] || gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+  gh release upload "$TAG" "$DIST_DIR"/* --repo "$GH_REPO" --clobber
 else
-  gh release create "$TAG" "$DIST_DIR"/* --generate-notes
+  gh release create "$TAG" "$DIST_DIR"/* --repo "$GH_REPO" --generate-notes
 fi
