@@ -21,6 +21,30 @@ copy_matches() {
   [[ "$found" -eq 1 ]]
 }
 
+copy_package_matches() {
+  local pattern="$1"
+  local found=0
+  local arch
+  local base
+  local stem
+  local ext
+
+  while IFS= read -r -d '' file; do
+    arch="$(basename "$(dirname "$(dirname "$file")")")"
+    case "$arch" in
+      aarch64_cortex-a72|aarch64_cortex-a76) ;;
+      *) continue ;;
+    esac
+    base="$(basename "$file")"
+    ext="${base##*.}"
+    stem="${base%.*}"
+    cp "$file" "$DIST_DIR/${stem}-${arch}.${ext}"
+    found=1
+  done < <(find ./bin/packages -path "$pattern" -type f -print0 2>/dev/null)
+
+  [[ "$found" -eq 1 ]]
+}
+
 copy_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*factory.img.gz' || true
 copy_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*sysupgrade.img.gz' || true
 copy_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*factory.img.gz' || true
@@ -28,8 +52,8 @@ copy_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*sysupgrade
 
 openwemo_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/network/services/openwemo-bridge-core/Makefile)"
 wemo_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/network/services/wemo-matter-bridge/Makefile)"
-copy_matches "./bin/packages/*/*/openwemo-bridge-core*-r${openwemo_release}.[ia]pk" || true
-copy_matches "./bin/packages/*/*/wemo-matter-bridge*-r${wemo_release}.[ia]pk" || true
+copy_package_matches "*/*/openwemo-bridge-core*-r${openwemo_release}.[ia]pk" || true
+copy_package_matches "*/*/wemo-matter-bridge*-r${wemo_release}.[ia]pk" || true
 
 if [[ -f docs/release-notes-template.md ]]; then
   cp docs/release-notes-template.md "$DIST_DIR/RELEASE_NOTES_TEMPLATE.md"
