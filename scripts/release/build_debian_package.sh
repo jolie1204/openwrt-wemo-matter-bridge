@@ -185,6 +185,7 @@ if [[ "$SKIP_MATTER_BUILD" -eq 0 ]]; then
     export TMPDIR="$WORK_DIR/tmp"
     export WEMO_CHIP_HOME="$WORK_DIR/tmp"
     export CIPD_CACHE_DIR="$WORK_DIR/cache/cipd"
+    export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
     WEMO_CHIP_STATE_DIR=/var/lib/wemo-matter-bridge/chip \
     WEMO_ENGINE_RPATH=/usr/lib \
     ./build_wemo_bridge.sh

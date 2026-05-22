@@ -30,6 +30,11 @@ The Matter SDK build may require additional packages depending on the Raspberry
 Pi OS release. If the CHIP bootstrap reports a missing tool, install that
 package and rerun the build script.
 
+Debian 13/trixie currently uses Python 3.13. The CHIP bootstrap dependencies
+may still carry Python bindings that only declare support through Python 3.12,
+so the release build script sets `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` while
+building the Matter SDK tools.
+
 ## Build The Package
 
 From the repository root on Raspberry Pi OS 64-bit:
