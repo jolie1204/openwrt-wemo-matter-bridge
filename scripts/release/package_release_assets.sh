@@ -4,6 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 TAG="${TAG:-$(git -C "$ROOT_DIR" describe --tags --always --dirty 2>/dev/null || echo snapshot)}"
+VERSION="${VERSION:-$TAG}"
+
+case "$VERSION" in
+  openwrt-rpi-v*|openwrt-packages-v*|raspios-deb-v*)
+    VERSION="v${VERSION##*-v}"
+    ;;
+esac
 
 cd "$ROOT_DIR"
 rm -rf "$DIST_DIR"
@@ -28,7 +35,7 @@ copy_image_matches() {
   local found=0
 
   while IFS= read -r -d '' file; do
-    cp "$file" "$DIST_DIR/openwemo-${target}-${TAG}-${variant}.img.gz"
+    cp "$file" "$DIST_DIR/openwemo-${target}-${VERSION}-${variant}.img.gz"
     found=1
   done < <(find . -path "$pattern" -type f -print0 2>/dev/null)
 
@@ -60,14 +67,8 @@ copy_package_matches() {
   [[ "$found" -eq 1 ]]
 }
 
-copy_image_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*ext4-factory.img.gz' rpi4 ext4-factory || true
-copy_image_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*ext4-sysupgrade.img.gz' rpi4 ext4-sysupgrade || true
-copy_image_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*squashfs-factory.img.gz' rpi4 squashfs-factory || true
-copy_image_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*squashfs-sysupgrade.img.gz' rpi4 squashfs-sysupgrade || true
-copy_image_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*ext4-factory.img.gz' rpi5 ext4-factory || true
-copy_image_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*ext4-sysupgrade.img.gz' rpi5 ext4-sysupgrade || true
-copy_image_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*squashfs-factory.img.gz' rpi5 squashfs-factory || true
-copy_image_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*squashfs-sysupgrade.img.gz' rpi5 squashfs-sysupgrade || true
+copy_image_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*ext4-sysupgrade.img.gz' rpi4 sysupgrade || true
+copy_image_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*ext4-sysupgrade.img.gz' rpi5 sysupgrade || true
 
 openwemo_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/network/services/openwemo-bridge-core/Makefile)"
 wemo_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/network/services/wemo-matter-bridge/Makefile)"
@@ -83,6 +84,7 @@ fi
 
 {
   echo "Release: $TAG"
+  echo "Version: $VERSION"
   echo "Generated: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   echo
   echo "Artifacts:"

@@ -2,7 +2,7 @@
 
 This repository can produce two release artifact types:
 
-- Raspberry Pi OpenWrt firmware images
+- Raspberry Pi OpenWrt firmware images for users who want an appliance image
 - OpenWrt package artifacts for compatible existing installations
 - experimental Raspberry Pi OS 64-bit Debian package artifacts
 
@@ -36,6 +36,16 @@ dist/
 ```
 
 The staged directory includes `SHA256SUMS` and `RELEASE_MANIFEST.txt`.
+Firmware image staging intentionally keeps only the versioned ext4 sysupgrade
+images:
+
+```text
+openwemo-rpi4-vX.Y.Z-sysupgrade.img.gz
+openwemo-rpi5-vX.Y.Z-sysupgrade.img.gz
+```
+
+These are the public Raspberry Pi download artifacts. Factory and squashfs
+variants are build outputs, not release assets.
 
 Raspberry Pi images include the `wemo-rootfs-resize` first-boot service. It
 expands an ext4 root partition to the available SD/eMMC size and skips layouts
@@ -61,37 +71,56 @@ If images/packages were already built:
 scripts/release/package_release_assets.sh
 ```
 
-## Create a Release Tag
-
-Use semantic version tags:
+Group artifacts by user path:
 
 ```sh
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+VERSION=v0.1.2 scripts/release/stage_usage_release_assets.sh
 ```
 
-Tag pushes trigger `.github/workflows/release-rpi.yml`.
+This creates:
+
+```text
+dist/openwrt-rpi/
+dist/openwrt-packages/
+dist/raspios-deb/
+```
+
+Use separate GitHub releases for each usage:
+
+```sh
+gh release create openwrt-rpi-v0.1.2 dist/openwrt-rpi/* \
+  --title "OpenWeMo Raspberry Pi OpenWrt Firmware v0.1.2"
+
+gh release create openwrt-packages-v0.1.2 dist/openwrt-packages/* \
+  --title "OpenWeMo OpenWrt Packages v0.1.2"
+
+gh release create raspios-deb-v0.1.2 dist/raspios-deb/* \
+  --title "OpenWeMo Raspberry Pi OS Debian Package v0.1.2"
+```
+
+## Create a Release Tag
+
+Use usage-prefixed tags so the GitHub Releases page stays readable:
+
+```sh
+git tag -a openwrt-rpi-v0.1.0 -m "OpenWrt Raspberry Pi firmware v0.1.0"
+git push origin openwrt-rpi-v0.1.0
+```
+
+`openwrt-rpi-vX.Y.Z` tag pushes trigger `.github/workflows/release-rpi.yml`.
+Package-only and Debian releases are currently uploaded locally after their
+artifacts are staged.
 
 ## Upload Release Assets
 
-Using GitHub CLI from a local machine:
+Using GitHub CLI from a local machine, first stage and group artifacts:
 
 ```sh
-scripts/release/create_github_release.sh v0.1.0
+VERSION=v0.1.0 scripts/release/package_release_assets.sh
+VERSION=v0.1.0 scripts/release/stage_usage_release_assets.sh
 ```
 
-To upload into an existing release:
-
-```sh
-scripts/release/create_github_release.sh v0.1.0 --upload-only
-```
-
-Equivalent raw GitHub CLI commands:
-
-```sh
-gh release create v0.1.0 dist/* --generate-notes
-gh release upload v0.1.0 dist/* --clobber
-```
+Then create or upload to the usage-specific release shown above.
 
 ## GitHub Actions
 
@@ -103,7 +132,7 @@ The release workflow:
 
 Behavior:
 
-- triggers on tags like `v0.1.0`
+- triggers on tags like `openwrt-rpi-v0.1.0`
 - builds Raspberry Pi 4 and Raspberry Pi 5 release artifacts by default
 - supports manual `rpi4`, `rpi5`, or `all` dispatch
 - supports manual package-only dispatch

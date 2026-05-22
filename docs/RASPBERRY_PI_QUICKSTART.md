@@ -20,8 +20,8 @@ Experimental target:
 Release image names contain the target name, for example:
 
 ```text
-openwrt-bcm27xx-bcm2711-rpi-4-wemo-matter-bridge-squashfs-factory.img.gz
-openwrt-bcm27xx-bcm2711-rpi-4-wemo-matter-bridge-squashfs-sysupgrade.img.gz
+openwemo-rpi4-vX.Y.Z-sysupgrade.img.gz
+openwemo-rpi5-vX.Y.Z-sysupgrade.img.gz
 ```
 
 ## Flash a Raspberry Pi Image
@@ -33,7 +33,7 @@ openwrt-bcm27xx-bcm2711-rpi-4-wemo-matter-bridge-squashfs-sysupgrade.img.gz
 sha256sum -c SHA256SUMS
 ```
 
-3. Flash the `factory.img.gz` file with Raspberry Pi Imager or balenaEtcher.
+3. Flash the `sysupgrade.img.gz` file with Raspberry Pi Imager or balenaEtcher.
 4. Boot the Raspberry Pi with Ethernet connected.
 5. Find the IP address in your router DHCP table.
 6. SSH into OpenWrt:

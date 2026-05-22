@@ -16,6 +16,7 @@ product unless that certification is actually completed.
 
 For Raspberry Pi users, start here:
 
+- [Downloads](docs/DOWNLOADS.md)
 - [Raspberry Pi Quick Start](docs/RASPBERRY_PI_QUICKSTART.md)
 - [Raspberry Pi OS Debian Package](docs/RASPBERRY_PI_OS_DEBIAN.md)
 - [Matter Onboarding](docs/MATTER_ONBOARDING.md)
@@ -398,11 +399,9 @@ bin/targets/bcm27xx/bcm2712/
 Typical output files include:
 
 - Pi 4
-  - `openwrt-bcm27xx-bcm2711-rpi-4-wemo-matter-bridge-squashfs-factory.img.gz`
-  - `openwrt-bcm27xx-bcm2711-rpi-4-wemo-matter-bridge-squashfs-sysupgrade.img.gz`
+  - `openwemo-rpi4-vX.Y.Z-sysupgrade.img.gz`
 - Pi 5
-  - `openwrt-bcm27xx-bcm2712-rpi-5-wemo-matter-bridge-squashfs-factory.img.gz`
-  - `openwrt-bcm27xx-bcm2712-rpi-5-wemo-matter-bridge-squashfs-sysupgrade.img.gz`
+  - `openwemo-rpi5-vX.Y.Z-sysupgrade.img.gz`
 
 Pi runtime notes:
 

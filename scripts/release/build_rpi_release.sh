@@ -19,6 +19,7 @@ Options:
 
 Environment:
   JOBS=N                   Build parallelism
+  VERSION=vX.Y.Z           Version string used in staged release filenames
 EOF
 }
 
@@ -86,6 +87,7 @@ CONFIG_TARGET_bcm27xx_bcm2711_DEVICE_rpi-4-wemo-matter-bridge=y
 CONFIG_PACKAGE_openwemo-bridge-core=y
 CONFIG_PACKAGE_wemo-matter-bridge=y
 CONFIG_PACKAGE_wemo-mtd-data=y
+CONFIG_PACKAGE_wemo-rootfs-resize=y
 CONFIG_PACKAGE_qrencode=y
 CONFIG_PACKAGE_wireguard-tools=y
 CONFIG_PACKAGE_sqlite3-cli=y
@@ -100,6 +102,7 @@ CONFIG_TARGET_bcm27xx_bcm2712_DEVICE_rpi-5-wemo-matter-bridge=y
 CONFIG_PACKAGE_openwemo-bridge-core=y
 CONFIG_PACKAGE_wemo-matter-bridge=y
 CONFIG_PACKAGE_wemo-mtd-data=y
+CONFIG_PACKAGE_wemo-rootfs-resize=y
 CONFIG_PACKAGE_qrencode=y
 CONFIG_PACKAGE_wireguard-tools=y
 CONFIG_PACKAGE_sqlite3-cli=y
@@ -118,6 +121,7 @@ for target in $TARGET_LIST; do
     echo "==> Building bridge packages for $target"
     make -j"$JOBS" package/network/services/openwemo-bridge-core/compile
     make -j"$JOBS" package/network/services/wemo-matter-bridge/compile
+    make -j"$JOBS" package/network/services/wemo-rootfs-resize/compile
   else
     echo "==> Building OpenWrt image for $target"
     make -j"$JOBS"

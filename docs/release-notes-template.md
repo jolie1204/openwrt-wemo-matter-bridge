@@ -6,18 +6,18 @@
 
 ## Highlights
 
-- Raspberry Pi image:
+- Intended user path:
+- Download this artifact:
 - Bridge package:
 - WeMo device behavior:
 - Matter onboarding:
 
 ## Artifacts
 
-- Raspberry Pi 4 factory image:
-- Raspberry Pi 4 sysupgrade image:
-- Raspberry Pi 5 factory image, if built:
-- Raspberry Pi 5 sysupgrade image, if built:
-- OpenWrt package artifacts:
+- Raspberry Pi 4 sysupgrade image, if this is a firmware release:
+- Raspberry Pi 5 sysupgrade image, if this is a firmware release:
+- OpenWrt package artifacts, if this is a package release:
+- Debian package artifact, if this is a Raspberry Pi OS release:
 - `SHA256SUMS`
 
 ## Upgrade Notes
