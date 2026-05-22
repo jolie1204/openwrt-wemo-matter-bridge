@@ -37,6 +37,10 @@ dist/
 
 The staged directory includes `SHA256SUMS` and `RELEASE_MANIFEST.txt`.
 
+Raspberry Pi images include the `wemo-rootfs-resize` first-boot service. It
+expands an ext4 root partition to the available SD/eMMC size and skips layouts
+with additional partitions after rootfs.
+
 ## Build Raspberry Pi OS Debian Package
 
 The Debian package must be built natively on Raspberry Pi OS 64-bit. It is not

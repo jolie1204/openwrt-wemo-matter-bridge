@@ -63,6 +63,7 @@ endef
 WEMO_MATTER_BRIDGE_PI_PACKAGES := \
 	openwemo-bridge-core \
 	wemo-mtd-data \
+	wemo-rootfs-resize \
 	wemo-matter-bridge \
 	qrencode \
 	wireguard-tools

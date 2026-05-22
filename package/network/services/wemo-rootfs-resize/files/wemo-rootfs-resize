@@ -1,0 +1,202 @@
+#!/bin/sh
+
+set -eu
+
+MARKER=/etc/wemo-rootfs-resize.done
+PENDING=/etc/wemo-rootfs-resize.pending
+TAG=wemo-rootfs-resize
+
+log()
+{
+	logger -t "$TAG" "$*"
+	echo "$TAG: $*"
+}
+
+root_mount_field()
+{
+	awk -v field="$1" '$2 == "/" { print $field; exit }' /proc/mounts
+}
+
+root_from_cmdline()
+{
+	tr ' ' '\n' < /proc/cmdline | sed -n 's/^root=//p' | head -n 1
+}
+
+resolve_root_device()
+{
+	local rootdev="$1"
+	local partdev
+
+	case "$rootdev" in
+		/dev/*)
+			[ -b "$rootdev" ] && {
+				echo "$rootdev"
+				return 0
+			}
+			;;
+		UUID=*|LABEL=*|PARTUUID=*)
+			if command -v findfs >/dev/null 2>&1; then
+				partdev="$(findfs "$rootdev" 2>/dev/null || true)"
+				[ -n "$partdev" ] && {
+					echo "$partdev"
+					return 0
+				}
+			fi
+			if command -v blkid >/dev/null 2>&1; then
+				partdev="$(blkid -o device -t "$rootdev" 2>/dev/null | head -n 1 || true)"
+				[ -n "$partdev" ] && {
+					echo "$partdev"
+					return 0
+				}
+			fi
+			if [ "${rootdev%%=*}" = "PARTUUID" ] && [ -r /lib/upgrade/common.sh ]; then
+				. /lib/upgrade/common.sh
+				if export_bootdevice && export_partdevice partdev 2; then
+					echo "/dev/$partdev"
+					return 0
+				fi
+			fi
+			;;
+	esac
+
+	return 1
+}
+
+split_root_device()
+{
+	local dev="$1"
+	local base
+	local partnum
+	local diskbase
+
+	base="${dev##*/}"
+	case "$base" in
+		mmcblk*p[0-9]*|nvme*n*p[0-9]*)
+			partnum="${base##*p}"
+			diskbase="${base%p[0-9]*}"
+			;;
+		*[0-9])
+			partnum="${base##*[!0-9]}"
+			diskbase="${base%[0-9]*}"
+			;;
+		*)
+			return 1
+			;;
+	esac
+
+	[ -n "$partnum" ] && [ -n "$diskbase" ] || return 1
+	ROOT_PART_NUM="$partnum"
+	ROOT_DISK="/dev/$diskbase"
+	ROOT_PART="/dev/$base"
+	ROOT_DISK_BASE="$diskbase"
+	ROOT_PART_BASE="$base"
+}
+
+require_cmd()
+{
+	command -v "$1" >/dev/null 2>&1 || {
+		log "missing command: $1"
+		return 1
+	}
+}
+
+has_later_partitions()
+{
+	partx -o NR -n "$((ROOT_PART_NUM + 1)):" "$ROOT_DISK" 2>/dev/null | grep -q '[0-9]'
+}
+
+resize_filesystem()
+{
+	log "growing filesystem on $ROOT_PART"
+	resize2fs "$ROOT_PART" >/tmp/wemo-rootfs-resize.resize2fs.log 2>&1 || {
+		cat /tmp/wemo-rootfs-resize.resize2fs.log >&2
+		log "resize2fs failed"
+		return 1
+	}
+	rm -f "$PENDING"
+	touch "$MARKER"
+	log "root filesystem resize complete"
+}
+
+main()
+{
+	local fstype rootdev rootarg disk_size part_start part_size wanted_size new_part_size
+
+	[ -e "$MARKER" ] && exit 0
+
+	fstype="$(root_mount_field 3)"
+	[ "$fstype" = "ext4" ] || {
+		log "root filesystem is '$fstype', not ext4; skipping"
+		touch "$MARKER"
+		exit 0
+	}
+
+	rootdev="$(root_mount_field 1)"
+	if [ "$rootdev" = "/dev/root" ]; then
+		rootdev="$(root_from_cmdline)"
+	fi
+	rootarg="$rootdev"
+	rootdev="$(resolve_root_device "$rootarg")" || {
+		log "unsupported root device '$rootarg'; skipping"
+		touch "$MARKER"
+		exit 0
+	}
+
+	split_root_device "$rootdev" || {
+		log "unable to parse root device '$rootdev'; skipping"
+		touch "$MARKER"
+		exit 0
+	}
+
+	[ -b "$ROOT_DISK" ] && [ -b "$ROOT_PART" ] || {
+		log "root disk/partition not found: $ROOT_DISK $ROOT_PART"
+		exit 1
+	}
+
+	require_cmd sfdisk || exit 1
+	require_cmd partx || exit 1
+	require_cmd resize2fs || exit 1
+
+	disk_size="$(cat "/sys/class/block/$ROOT_DISK_BASE/size")"
+	part_start="$(cat "/sys/class/block/$ROOT_PART_BASE/start")"
+	part_size="$(cat "/sys/class/block/$ROOT_PART_BASE/size")"
+	wanted_size="$((disk_size - part_start))"
+
+	if has_later_partitions; then
+		log "partitions exist after $ROOT_PART; not resizing"
+		touch "$MARKER"
+		exit 0
+	fi
+
+	if [ "$wanted_size" -le "$((part_size + 2048))" ]; then
+		resize_filesystem
+		exit 0
+	fi
+
+	if [ -e "$PENDING" ]; then
+		log "partition resize is pending but kernel still reports old size; rebooting"
+		reboot
+		exit 0
+	fi
+
+	log "expanding $ROOT_PART from ${part_size} sectors to ${wanted_size} sectors"
+	printf ', +\n' | sfdisk --no-reread -N "$ROOT_PART_NUM" "$ROOT_DISK" >/tmp/wemo-rootfs-resize.sfdisk.log 2>&1 || {
+		cat /tmp/wemo-rootfs-resize.sfdisk.log >&2
+		log "sfdisk failed"
+		return 1
+	}
+
+	partx -u "$ROOT_DISK" >/tmp/wemo-rootfs-resize.partx.log 2>&1 || true
+	sleep 2
+	new_part_size="$(cat "/sys/class/block/$ROOT_PART_BASE/size")"
+
+	if [ "$new_part_size" -gt "$part_size" ]; then
+		resize_filesystem
+	else
+		touch "$PENDING"
+		log "kernel still reports old partition size; rebooting to apply partition table"
+		reboot
+	fi
+}
+
+main "$@"

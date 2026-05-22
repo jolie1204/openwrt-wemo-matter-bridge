@@ -71,8 +71,10 @@ copy_image_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*squa
 
 openwemo_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/network/services/openwemo-bridge-core/Makefile)"
 wemo_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/network/services/wemo-matter-bridge/Makefile)"
+resize_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/network/services/wemo-rootfs-resize/Makefile)"
 copy_package_matches "*/*/openwemo-bridge-core*-r${openwemo_release}.[ia]pk" || true
 copy_package_matches "*/*/wemo-matter-bridge*-r${wemo_release}.[ia]pk" || true
+copy_package_matches "*/*/wemo-rootfs-resize*-r${resize_release}.[ia]pk" || true
 copy_matches './bin/debian/openwemo-matter-bridge-*.deb' || true
 
 if [[ -f docs/release-notes-template.md ]]; then

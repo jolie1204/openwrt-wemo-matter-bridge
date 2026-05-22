@@ -407,6 +407,10 @@ Typical output files include:
 Pi runtime notes:
 
 - OpenWrt on Raspberry Pi uses `eth0` as `lan` by default.
+- The `wemo-rootfs-resize` first-boot service grows an ext4 root partition to
+  fill the backing SD card or eMMC device. It detects the booted root partition
+  from `/dev/*`, `PARTUUID=`, `UUID=`, or `LABEL=` root arguments and skips
+  non-ext4 roots or layouts with partitions after rootfs.
 - The bridge services and indicator now resolve the actual `lan` device
   dynamically, so they are not tied to `br-lan`.
 - On targets without the Wemo-specific MTD `data` partition, `wemo-mtd-data`

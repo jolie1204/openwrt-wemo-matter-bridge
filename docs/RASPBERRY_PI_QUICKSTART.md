@@ -42,6 +42,11 @@ sha256sum -c SHA256SUMS
 ssh root@<bridge-ip>
 ```
 
+On the first boot, the image expands the ext4 root partition to fill the SD
+card or eMMC device. If the kernel cannot reload the changed partition table
+while rootfs is mounted, the service will reboot once and finish the filesystem
+resize on the next boot.
+
 7. Check service status:
 
 ```sh
