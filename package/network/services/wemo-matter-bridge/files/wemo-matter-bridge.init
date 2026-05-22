@@ -5,6 +5,7 @@ USE_PROCD=1
 
 STATE_DIR=/data/wemo-matter
 CHIP_DIR=/data/wemo-matter/chip
+ONBOARDING_JSON=/etc/wemo-matter-bridge/matter-onboarding.json
 NETWORK=lan
 DEFAULT_IFACE=br-lan
 WAIT_SECS=90
@@ -12,6 +13,13 @@ READY_SETTLE_SECS=2
 STATE_POLL_INTERVAL_SECS=15
 DEVICE_SYNC_INTERVAL_SECS=30
 INITIAL_DISCOVERY_WAIT_SECS=90
+
+json_get()
+{
+	local key="$1"
+
+	jsonfilter -q -i "$ONBOARDING_JSON" -e "@.$key" 2>/dev/null
+}
 
 resolve_ifname()
 {
@@ -60,7 +68,9 @@ prepare_state()
 	mkdir -p "$CHIP_DIR"
 	chmod 0700 "$STATE_DIR" "$CHIP_DIR"
 
-	touch "$CHIP_DIR/chip_factory.ini"
+	/usr/sbin/wemo-matter-bridge onboarding || return 1
+
+	[ -s "$CHIP_DIR/chip_factory.ini" ] || touch "$CHIP_DIR/chip_factory.ini"
 	touch "$CHIP_DIR/chip_config.ini"
 	touch "$CHIP_DIR/chip_counters.ini"
 
@@ -71,16 +81,26 @@ prepare_state()
 
 start_service()
 {
-	local ifname
+	local ifname passcode discriminator
 
 	prepare_state || return 1
 	wait_for_network || return 1
 	ifname="$(resolve_ifname)"
+	passcode="$(json_get setup_passcode)"
+	discriminator="$(json_get discriminator)"
+	[ -n "$passcode" ] && [ -n "$discriminator" ] || {
+		echo "Wemo Matter onboarding data is missing"
+		return 1
+	}
+
+	logger -t wemo-matter-bridge "Matter onboarding ready: run 'wemo-matter-bridge qr' to show pairing code"
 
 	procd_open_instance
 	procd_set_param command /usr/sbin/wemo-bridge-app \
 		--KVS "$CHIP_DIR/chip_kvs" \
-		--interface-id "$ifname"
+		--interface-id "$ifname" \
+		--passcode "$passcode" \
+		--discriminator "$discriminator"
 	procd_set_param env \
 		WEMO_DEVICE_DB_PATH="$STATE_DIR/wemo_device.db" \
 		WEMO_STATE_DB_PATH="$STATE_DIR/wemo_state.db" \

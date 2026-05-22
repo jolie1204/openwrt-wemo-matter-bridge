@@ -1,17 +1,45 @@
-# OpenWrt for Wemo Matter Bridge
+# OpenWrt WeMo Matter Bridge
 
-This repository is a device-focused OpenWrt fork for the Belkin Wemo Bridge
-hardware based on MT7628. Its primary job is to build firmware for a Wemo to
-Matter bridge appliance, not to serve as a generic OpenWrt distribution tree.
+This repository is an OpenWrt-based firmware and package tree for a local
+WeMo-to-Matter bridge. Its job is to help legacy Belkin WeMo LAN devices appear
+as Matter endpoints through a bridge running on OpenWrt.
 
-The tree carries custom board support, bridge packages, persistent state
-handling, and operational defaults needed to replace a host-based Wemo Matter
-bridge with a self-contained OpenWrt image.
+Raspberry Pi is the primary release target. The tree also carries the existing
+Belkin MT7628 bridge appliance support, bridge packages, persistent state
+handling, and operational defaults needed for a self-contained OpenWrt image.
+
+The project is local-first and privacy-friendly. It does not require Belkin
+cloud access, and it should not be described as an official Matter certified
+product unless that certification is actually completed.
+
+## Quick Start for Users
+
+For Raspberry Pi users, start here:
+
+- [Raspberry Pi Quick Start](docs/RASPBERRY_PI_QUICKSTART.md)
+- [Matter Onboarding](docs/MATTER_ONBOARDING.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Compatibility](docs/COMPATIBILITY.md)
+
+Normal first boot flow:
+
+```sh
+ssh root@<bridge-ip>
+wemo-matter-bridge status
+wemo-matter-bridge qr
+```
+
+Then scan the QR code in Apple Home or Google Home.
+
+Release images generate unique Matter onboarding credentials on first boot.
+They do not ship with one shared setup passcode.
 
 ## Scope
 
 This fork adds Wemo bridge specific behavior on top of upstream OpenWrt:
 
+- Raspberry Pi 4 image profile for `bcm27xx/bcm2711`
+- experimental Raspberry Pi 5 image profile for `bcm27xx/bcm2712`
 - `wemo-matter-bridge` target profile for the Belkin MT7628 bridge hardware
 - native `openwemo-bridge-core` package with source vendored in this tree
 - native `wemo-matter-bridge` package with source vendored in this tree
@@ -26,6 +54,14 @@ boot slots, or Wi-Fi-first router use cases.
 
 ## Supported targets
 
+- `rpi-4-wemo-matter-bridge`
+  - primary release target
+  - OpenWrt target `bcm27xx/bcm2711`
+  - image format `factory.img.gz` and `sysupgrade.img.gz`
+- `rpi-5-wemo-matter-bridge`
+  - experimental release target
+  - OpenWrt target `bcm27xx/bcm2712`
+  - image format `factory.img.gz` and `sysupgrade.img.gz`
 - `wemo-matter-bridge`
   - default and recommended target
   - 16 MiB SPI NOR

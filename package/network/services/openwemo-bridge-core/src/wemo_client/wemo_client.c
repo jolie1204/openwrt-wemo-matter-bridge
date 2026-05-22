@@ -1026,7 +1026,7 @@ void wemo_print_cached_device_list()
     printf("cached devices: count=%d\n", list.count);
     for (i = 0; i < list.count; i++) {
         const struct we_device_info *d = &list.items[i];
-        printf("id=%d online=%d state=%d level=%d type=%s(%d) udn=%s name=\"%s\"\n",
+        printf("id=%d online=%d state=%d level=%d type=%s(%d) udn=%s name=\"%s\" model=\"%s\" serial=\"%s\" firmware=\"%s\"\n",
                d->wemo_id,
                d->is_online,
                d->state,
@@ -1034,7 +1034,10 @@ void wemo_print_cached_device_list()
                wemo_device_type_name(d->device_type),
                d->device_type,
                d->udn[0] ? d->udn : "-",
-               d->friendly_name[0] ? d->friendly_name : "-");
+               d->friendly_name[0] ? d->friendly_name : "-",
+               d->model_name[0] ? d->model_name : "-",
+               d->serial_number[0] ? d->serial_number : "-",
+               d->firmware_version[0] ? d->firmware_version : "-");
     }
 }
 

@@ -64,6 +64,7 @@ WEMO_MATTER_BRIDGE_PI_PACKAGES := \
 	openwemo-bridge-core \
 	wemo-mtd-data \
 	wemo-matter-bridge \
+	qrencode \
 	wireguard-tools
 
 ### Devices ###

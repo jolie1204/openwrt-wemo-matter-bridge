@@ -160,12 +160,16 @@ std::vector<WemoDevice> WemoAdapterOpenWemo::ListCachedDevices()
         const struct we_device_info & info = list.items[i];
 
         WemoDevice device;
-        device.wemo_id       = info.wemo_id;
-        device.device_type   = info.device_type;
-        device.udn           = info.udn;
-        device.friendly_name = info.friendly_name;
-        device.is_online     = (info.is_online != 0);
-        device.onoff         = static_cast<uint8_t>(info.state ? 1 : 0);
+        device.wemo_id          = info.wemo_id;
+        device.device_type      = info.device_type;
+        device.udn              = info.udn;
+        device.friendly_name    = info.friendly_name;
+        device.manufacturer     = info.manufacturer;
+        device.model_name       = info.model_name;
+        device.serial_number    = info.serial_number;
+        device.firmware_version = info.firmware_version;
+        device.is_online        = (info.is_online != 0);
+        device.onoff            = static_cast<uint8_t>(info.state ? 1 : 0);
         // Some firmware reports a generic device_type even for dimmers but
         // still provides a valid level (0-100).
         device.supports_level = (info.device_type == kTypeDimmer) || (info.level >= 0);

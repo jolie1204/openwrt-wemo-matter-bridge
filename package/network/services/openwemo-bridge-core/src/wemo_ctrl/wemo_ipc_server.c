@@ -408,6 +408,24 @@ static int wemo_ctrl_get_health_snapshot(int wemo_id, int max_items, struct we_h
     return WE_STATUS_OK;
 }
 
+static void copy_sqlite_text(char *dst, size_t dst_len, sqlite3_stmt *stmt, int column)
+{
+    const unsigned char *text;
+
+    if (dst == NULL || dst_len == 0 || stmt == NULL) {
+        return;
+    }
+
+    text = sqlite3_column_text(stmt, column);
+    if (text == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+
+    strncpy(dst, (const char *)text, dst_len - 1);
+    dst[dst_len - 1] = '\0';
+}
+
 static int wemo_ctrl_list_devices(struct we_device_list *out)
 {
     sqlite3 *dev_db = NULL;
@@ -433,7 +451,8 @@ static int wemo_ctrl_list_devices(struct we_device_list *out)
     }
     sqlite3_busy_timeout(dev_db, 2000);
     rc = sqlite3_prepare_v2(dev_db,
-        "SELECT wemo_id, UDN, device_type, friendly_name "
+        "SELECT wemo_id, UDN, device_type, friendly_name, "
+        "model_name, serial_number, firmware_version, manufacturer "
         "FROM wemo_device "
         "WHERE retired = 0 "
         "ORDER BY wemo_id LIMIT ?;",
@@ -446,19 +465,14 @@ static int wemo_ctrl_list_devices(struct we_device_list *out)
 
     while (count < WE_DEVICE_LIST_MAX_ITEMS && sqlite3_step(dev_stmt) == SQLITE_ROW) {
         struct we_device_info *d = &out->items[count];
-        const unsigned char *text;
         d->wemo_id = sqlite3_column_int(dev_stmt, 0);
-        text = sqlite3_column_text(dev_stmt, 1);
-        if (text != NULL) {
-            strncpy(d->udn, (const char *)text, sizeof(d->udn) - 1);
-            d->udn[sizeof(d->udn) - 1] = '\0';
-        }
+        copy_sqlite_text(d->udn, sizeof(d->udn), dev_stmt, 1);
         d->device_type = sqlite3_column_int(dev_stmt, 2);
-        text = sqlite3_column_text(dev_stmt, 3);
-        if (text != NULL) {
-            strncpy(d->friendly_name, (const char *)text, sizeof(d->friendly_name) - 1);
-            d->friendly_name[sizeof(d->friendly_name) - 1] = '\0';
-        }
+        copy_sqlite_text(d->friendly_name, sizeof(d->friendly_name), dev_stmt, 3);
+        copy_sqlite_text(d->model_name, sizeof(d->model_name), dev_stmt, 4);
+        copy_sqlite_text(d->serial_number, sizeof(d->serial_number), dev_stmt, 5);
+        copy_sqlite_text(d->firmware_version, sizeof(d->firmware_version), dev_stmt, 6);
+        copy_sqlite_text(d->manufacturer, sizeof(d->manufacturer), dev_stmt, 7);
         d->level = -1;
         count++;
     }

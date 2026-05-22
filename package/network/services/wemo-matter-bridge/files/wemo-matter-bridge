@@ -1,0 +1,311 @@
+#!/bin/sh
+
+CONFIG_DIR=/etc/wemo-matter-bridge
+UCI_CONFIG=wemo-matter-bridge
+STATE_DIR=/data/wemo-matter
+CHIP_DIR=$STATE_DIR/chip
+ONBOARDING_JSON=$CONFIG_DIR/matter-onboarding.json
+FACTORY_INI=$CHIP_DIR/chip_factory.ini
+BRIDGE_APP=/usr/sbin/wemo-bridge-app
+QR_PNG=/tmp/wemo-matter-bridge-qr.png
+WWW_QR_PNG=/www/wemo-matter-bridge-qr.png
+
+DEV_FIXED_PASSCODE=20202021
+DEV_FIXED_DISCRIMINATOR=3840
+
+load_config()
+{
+	local value
+
+	if command -v uci >/dev/null 2>&1; then
+		value="$(uci -q get "$UCI_CONFIG.main.generate_onboarding")"
+		[ -n "$value" ] && WEMO_BRIDGE_GENERATE_ONBOARDING="${WEMO_BRIDGE_GENERATE_ONBOARDING:-$value}"
+		value="$(uci -q get "$UCI_CONFIG.main.dev_fixed_onboarding")"
+		[ -n "$value" ] && WEMO_BRIDGE_DEV_FIXED_ONBOARDING="${WEMO_BRIDGE_DEV_FIXED_ONBOARDING:-$value}"
+	fi
+
+	WEMO_BRIDGE_GENERATE_ONBOARDING="${WEMO_BRIDGE_GENERATE_ONBOARDING:-1}"
+	WEMO_BRIDGE_DEV_FIXED_ONBOARDING="${WEMO_BRIDGE_DEV_FIXED_ONBOARDING:-0}"
+}
+
+is_enabled()
+{
+	case "$1" in
+		1|on|ON|true|TRUE|yes|YES) return 0 ;;
+	esac
+	return 1
+}
+
+json_get()
+{
+	local key="$1"
+
+	if command -v jsonfilter >/dev/null 2>&1; then
+		jsonfilter -q -i "$ONBOARDING_JSON" -e "@.$key" 2>/dev/null && return 0
+	fi
+
+	sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\{0,1\\}\\([^\",}]*\\)\"\\{0,1\\}.*/\\1/p" "$ONBOARDING_JSON" 2>/dev/null | head -n 1
+}
+
+random_uint32()
+{
+	hexdump -n 4 -e '1/4 "%u"' /dev/urandom 2>/dev/null
+}
+
+valid_passcode()
+{
+	case "$1" in
+		""|*[!0-9]*) return 1 ;;
+	esac
+
+	[ "$1" -gt 0 ] 2>/dev/null || return 1
+	[ "$1" -le 99999998 ] 2>/dev/null || return 1
+	case "$1" in
+		11111111|22222222|33333333|44444444|55555555|66666666|77777777|88888888|12345678|87654321|20202021|20202022)
+			return 1
+			;;
+	esac
+}
+
+random_passcode()
+{
+	local pin
+
+	while true; do
+		pin="$(( $(random_uint32) % 99999998 + 1 ))"
+		valid_passcode "$pin" && {
+			printf '%s\n' "$pin"
+			return 0
+		}
+	done
+}
+
+random_discriminator()
+{
+	printf '%s\n' "$(( $(random_uint32) % 4096 ))"
+}
+
+payload_field()
+{
+	local key="$1"
+
+	sed -n "s/^$key=//p" | head -n 1
+}
+
+generate_payload()
+{
+	local passcode="$1"
+	local discriminator="$2"
+
+	"$BRIDGE_APP" --wemo-onboarding-payload "$passcode" "$discriminator" 2>/dev/null
+}
+
+write_factory_ini()
+{
+	local passcode="$1"
+	local discriminator="$2"
+
+	mkdir -p "$CHIP_DIR"
+	chmod 0700 "$STATE_DIR" "$CHIP_DIR" 2>/dev/null || true
+	{
+		printf '[DEFAULT]\n'
+		printf 'discriminator=%s\n' "$discriminator"
+		printf 'pin-code=%s\n' "$passcode"
+	} > "$FACTORY_INI.tmp" || return 1
+	chmod 0600 "$FACTORY_INI.tmp"
+	mv "$FACTORY_INI.tmp" "$FACTORY_INI"
+}
+
+write_onboarding_json()
+{
+	local passcode="$1"
+	local discriminator="$2"
+	local payload="$3"
+	local manual="$4"
+	local generated_at
+
+	generated_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date)"
+	mkdir -p "$CONFIG_DIR"
+	chmod 0700 "$CONFIG_DIR" 2>/dev/null || true
+	{
+		printf '{\n'
+		printf '  "setup_passcode": %s,\n' "$passcode"
+		printf '  "discriminator": %s,\n' "$discriminator"
+		printf '  "qr_payload": "%s",\n' "$payload"
+		printf '  "manual_pairing_code": "%s",\n' "$manual"
+		printf '  "generated_at": "%s"\n' "$generated_at"
+		printf '}\n'
+	} > "$ONBOARDING_JSON.tmp" || return 1
+	chmod 0600 "$ONBOARDING_JSON.tmp"
+	mv "$ONBOARDING_JSON.tmp" "$ONBOARDING_JSON"
+}
+
+ensure_onboarding()
+{
+	local passcode discriminator payload_out qr_payload manual_code
+
+	load_config
+
+	if ! is_enabled "$WEMO_BRIDGE_GENERATE_ONBOARDING"; then
+		return 0
+	fi
+
+	if [ -s "$ONBOARDING_JSON" ]; then
+		passcode="$(json_get setup_passcode)"
+		discriminator="$(json_get discriminator)"
+		[ -n "$passcode" ] && [ -n "$discriminator" ] && {
+			[ -s "$FACTORY_INI" ] || write_factory_ini "$passcode" "$discriminator"
+			return 0
+		}
+	fi
+
+	if is_enabled "$WEMO_BRIDGE_DEV_FIXED_ONBOARDING"; then
+		passcode="$DEV_FIXED_PASSCODE"
+		discriminator="$DEV_FIXED_DISCRIMINATOR"
+	else
+		passcode="$(random_passcode)"
+		discriminator="$(random_discriminator)"
+	fi
+
+	payload_out="$(generate_payload "$passcode" "$discriminator")" || {
+		echo "failed to generate Matter onboarding payload" >&2
+		return 1
+	}
+	qr_payload="$(printf '%s\n' "$payload_out" | sed -n 's/^qr_payload=//p' | head -n 1)"
+	manual_code="$(printf '%s\n' "$payload_out" | sed -n 's/^manual_pairing_code=//p' | head -n 1)"
+	[ -n "$qr_payload" ] && [ -n "$manual_code" ] || {
+		echo "Matter onboarding payload generator did not return QR/manual codes" >&2
+		return 1
+	}
+
+	write_factory_ini "$passcode" "$discriminator" || return 1
+	write_onboarding_json "$passcode" "$discriminator" "$qr_payload" "$manual_code"
+}
+
+print_qr()
+{
+	local qr_payload manual_code
+
+	ensure_onboarding || return 1
+	qr_payload="$(json_get qr_payload)"
+	manual_code="$(json_get manual_pairing_code)"
+
+	printf 'Matter QR payload: %s\n' "$qr_payload"
+	printf 'Manual pairing code: %s\n' "$manual_code"
+	printf 'Onboarding file: %s\n' "$ONBOARDING_JSON"
+
+	if command -v qrencode >/dev/null 2>&1 && [ -n "$qr_payload" ]; then
+		printf '\n'
+		qrencode -t ANSIUTF8 "$qr_payload" 2>/dev/null || true
+		qrencode -o "$QR_PNG" "$qr_payload" 2>/dev/null && printf '\nPNG: %s\n' "$QR_PNG"
+		if [ -d /www ] && [ -w /www ]; then
+			qrencode -o "$WWW_QR_PNG" "$qr_payload" 2>/dev/null && printf 'Web PNG: %s\n' "$WWW_QR_PNG"
+		fi
+	else
+		printf 'ASCII QR unavailable: install qrencode or use the QR payload/manual code above.\n'
+	fi
+}
+
+status_cmd()
+{
+	printf 'wemo_ctrl: '
+	if pidof wemo_ctrl >/dev/null 2>&1; then
+		printf 'running\n'
+	else
+		printf 'stopped\n'
+	fi
+
+	printf 'wemo-bridge-app: '
+	if pidof wemo-bridge-app >/dev/null 2>&1; then
+		printf 'running\n'
+	else
+		printf 'stopped\n'
+	fi
+
+	if [ -s "$ONBOARDING_JSON" ]; then
+		printf 'onboarding: configured (%s)\n' "$ONBOARDING_JSON"
+	else
+		printf 'onboarding: not generated\n'
+	fi
+
+	if command -v wemo_client >/dev/null 2>&1; then
+		printf 'wemo_client: installed\n'
+	fi
+}
+
+scan_wemo()
+{
+	command -v wemo_client >/dev/null 2>&1 || {
+		echo "wemo_client is not installed" >&2
+		return 1
+	}
+	printf 'discover\nlistdev\nexit\n' | WEMO_CLIENT_QUIET=1 wemo_client
+}
+
+reset_onboarding()
+{
+	if [ "$1" != "--force" ] && [ "$1" != "-f" ]; then
+		echo "This resets local onboarding credentials."
+		echo "Already-commissioned Apple Home / Google Home controllers may need the bridge removed and added again."
+		printf 'Continue? [y/N] '
+		read answer
+		case "$answer" in
+			y|Y|yes|YES) ;;
+			*) echo "cancelled"; return 1 ;;
+		esac
+	fi
+
+	rm -f "$ONBOARDING_JSON" "$FACTORY_INI" "$QR_PNG" "$WWW_QR_PNG"
+	ensure_onboarding
+	print_qr
+}
+
+usage()
+{
+	cat <<'EOF'
+Usage: wemo-matter-bridge <command>
+
+Commands:
+  onboarding          Generate onboarding data if missing and print JSON path
+  qr                  Print QR payload, manual code, and ASCII QR when qrencode is installed
+  reset-onboarding    Regenerate onboarding data; controllers may need recommissioning
+  status              Show bridge process and onboarding status
+  logs                Follow relevant OpenWrt logs
+  scan-wemo           Trigger WeMo discovery and list devices through wemo_client
+  restart             Restart wemo_ctrl and wemo-matter-bridge services
+EOF
+}
+
+case "$1" in
+	onboarding)
+		ensure_onboarding || exit 1
+		printf 'Onboarding file: %s\n' "$ONBOARDING_JSON"
+		;;
+	qr)
+		print_qr
+		;;
+	reset-onboarding)
+		shift
+		reset_onboarding "$@"
+		;;
+	status)
+		status_cmd
+		;;
+	logs)
+		logread -f -e wemo -e matter -e CHIP
+		;;
+	scan-wemo)
+		scan_wemo
+		;;
+	restart)
+		/etc/init.d/wemo_ctrl restart
+		/etc/init.d/wemo-matter-bridge restart
+		;;
+	help|-h|--help|"")
+		usage
+		;;
+	*)
+		usage >&2
+		exit 1
+		;;
+esac

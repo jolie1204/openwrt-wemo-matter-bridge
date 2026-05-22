@@ -11,6 +11,10 @@ struct WemoDevice
     int device_type = 0;
     std::string udn;
     std::string friendly_name;
+    std::string manufacturer;
+    std::string model_name;
+    std::string serial_number;
+    std::string firmware_version;
     bool supports_level = false;
     bool is_plug = false;
     bool is_online = false;

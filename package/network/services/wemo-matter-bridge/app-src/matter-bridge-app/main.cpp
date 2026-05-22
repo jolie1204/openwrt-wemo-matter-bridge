@@ -38,6 +38,7 @@
 #include <lib/support/CHIPMem.h>
 #include <lib/support/ZclString.h>
 #include <platform/CommissionableDataProvider.h>
+#include <setup_payload/ManualSetupPayloadGenerator.h>
 #include <setup_payload/QRCodeSetupPayloadGenerator.h>
 #include <setup_payload/SetupPayload.h>
 
@@ -65,7 +66,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -91,6 +94,8 @@ BridgeCommandDelegate sBridgeCommandDelegate;
 
 const int kNodeLabelSize = 32;
 const int kUniqueIdSize  = 32;
+const int kBasicInfoNameSize = 32;
+const int kBasicInfoLongStringSize = 64;
 // Current ZCL implementation of Struct uses a max-size array of 254 bytes
 const int kDescriptorAttributeArraySize = 254;
 
@@ -102,6 +107,73 @@ Device * gDevices[CHIP_DEVICE_CONFIG_DYNAMIC_ENDPOINT_COUNT + 1];
 const int16_t minMeasuredValue     = -27315;
 const int16_t maxMeasuredValue     = 32766;
 const int16_t initialMeasuredValue = 100;
+
+std::optional<uint32_t> ParseUint32(const char * value)
+{
+    if (value == nullptr || value[0] == '\0')
+    {
+        return std::nullopt;
+    }
+
+    char * end = nullptr;
+    unsigned long parsed = std::strtoul(value, &end, 0);
+    if (end == nullptr || *end != '\0' || parsed > std::numeric_limits<uint32_t>::max())
+    {
+        return std::nullopt;
+    }
+
+    return static_cast<uint32_t>(parsed);
+}
+
+int PrintOnboardingPayload(int argc, char * argv[])
+{
+    if (argc != 4)
+    {
+        std::cerr << "Usage: " << argv[0] << " --wemo-onboarding-payload <setup-passcode> <discriminator>\n";
+        return 2;
+    }
+
+    const auto passcode      = ParseUint32(argv[2]);
+    const auto discriminator = ParseUint32(argv[3]);
+    if (!passcode.has_value() || !discriminator.has_value() || discriminator.value() > chip::kMaxDiscriminatorValue)
+    {
+        std::cerr << "Invalid setup passcode or discriminator\n";
+        return 2;
+    }
+
+    chip::PayloadContents payload;
+    payload.version             = 0;
+    payload.vendorID            = CHIP_DEVICE_CONFIG_DEVICE_VENDOR_ID;
+    payload.productID           = CHIP_DEVICE_CONFIG_DEVICE_PRODUCT_ID;
+    payload.commissioningFlow   = chip::CommissioningFlow::kStandard;
+    payload.setUpPINCode        = passcode.value();
+    payload.rendezvousInformation.SetValue(chip::RendezvousInformationFlags(chip::RendezvousInformationFlag::kOnNetwork));
+    payload.discriminator.SetLongValue(static_cast<uint16_t>(discriminator.value()));
+
+    char qrBuffer[chip::QRCodeBasicSetupPayloadGenerator::kMaxQRCodeBase38RepresentationLength + 1] = {};
+    chip::MutableCharSpan qrCode(qrBuffer);
+    CHIP_ERROR err = chip::QRCodeBasicSetupPayloadGenerator(payload).payloadBase38Representation(qrCode);
+    if (err != CHIP_NO_ERROR)
+    {
+        std::cerr << "Failed to generate QR payload: " << err.AsString() << "\n";
+        return 1;
+    }
+
+    char manualBuffer[chip::kManualSetupLongCodeCharLength + 1] = {};
+    chip::MutableCharSpan manualCode(manualBuffer);
+    err = chip::ManualSetupPayloadGenerator(payload).payloadDecimalStringRepresentation(manualCode);
+    if (err != CHIP_NO_ERROR)
+    {
+        std::cerr << "Failed to generate manual pairing code: " << err.AsString() << "\n";
+        return 1;
+    }
+
+    std::cout << "qr_payload=" << qrCode.data() << "\n";
+    std::cout << "manual_pairing_code=" << manualCode.data() << "\n";
+    std::cout << "vendor_id=" << payload.vendorID << "\n";
+    std::cout << "product_id=" << payload.productID << "\n";
+    return 0;
+}
 
 // ENDPOINT DEFINITIONS:
 // =================================================================================
@@ -157,8 +229,15 @@ DECLARE_DYNAMIC_ATTRIBUTE(Descriptor::Attributes::DeviceTypeList::Id, ARRAY, kDe
 
 // Declare Bridged Device Basic Information cluster attributes
 DECLARE_DYNAMIC_ATTRIBUTE_LIST_BEGIN(bridgedDeviceBasicAttrs)
-DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::NodeLabel::Id, CHAR_STRING, kNodeLabelSize,
+DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::VendorName::Id, CHAR_STRING, kBasicInfoNameSize, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::ProductName::Id, CHAR_STRING, kBasicInfoNameSize, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::NodeLabel::Id, CHAR_STRING, kNodeLabelSize,
                           ZAP_ATTRIBUTE_MASK(WRITABLE) | ZAP_ATTRIBUTE_MASK(EXTERNAL_STORAGE)),         /* NodeLabel */
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::SoftwareVersionString::Id, CHAR_STRING,
+                              kBasicInfoLongStringSize, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::ProductLabel::Id, CHAR_STRING,
+                              kBasicInfoLongStringSize, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::SerialNumber::Id, CHAR_STRING, kBasicInfoNameSize, 0),
     DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::Reachable::Id, BOOLEAN, 1, 0), /* Reachable */
     DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::UniqueID::Id, CHAR_STRING, kUniqueIdSize, 0),
     DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::ConfigurationVersion::Id, INT32U, 4,
@@ -204,6 +283,12 @@ DECLARE_DYNAMIC_ATTRIBUTE_LIST_BEGIN(levelControlAttrs)
 DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::CurrentLevel::Id, INT8U, 1, 0),  /* CurrentLevel (nullable) */
     DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::MinLevel::Id, INT8U, 1, 0),  /* MinLevel */
     DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::MaxLevel::Id, INT8U, 1, 0),  /* MaxLevel */
+    DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::Options::Id, BITMAP8, 1, ZAP_ATTRIBUTE_MASK(WRITABLE)),
+    DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::OnOffTransitionTime::Id, INT16U, 2, ZAP_ATTRIBUTE_MASK(WRITABLE)),
+    DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::OnLevel::Id, INT8U, 1,
+                              ZAP_ATTRIBUTE_MASK(WRITABLE) | ZAP_ATTRIBUTE_MASK(NULLABLE)),
+    DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::DefaultMoveRate::Id, INT8U, 1,
+                              ZAP_ATTRIBUTE_MASK(WRITABLE) | ZAP_ATTRIBUTE_MASK(NULLABLE)),
     DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::ClusterRevision::Id, INT16U, 2, 0), /* ClusterRevision */
     DECLARE_DYNAMIC_ATTRIBUTE(LevelControl::Attributes::FeatureMap::Id, BITMAP32, 4, 0),    /* FeatureMap */
     DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
@@ -276,12 +361,37 @@ struct BridgedWemoLight
     int commandedLevel = -1;  // -1 = no pending command, 0-254 = level
     std::chrono::steady_clock::time_point commandedOnOffUntil;
     std::chrono::steady_clock::time_point commandedLevelUntil;
+
+    std::string manufacturer;
+    std::string modelName;
+    std::string serialNumber;
+    std::string firmwareVersion;
 };
 
 constexpr auto kCommandSettleWindow = std::chrono::milliseconds(2000);
+constexpr auto kMinWemoLevelCommandInterval = std::chrono::milliseconds(700);
+
+struct LevelControlSettings
+{
+    uint8_t options = 0;
+    uint16_t onOffTransitionTimeDs = 0;
+    uint8_t onLevel = 0xff;         // nullable int8u null marker
+    uint8_t defaultMoveRate = 0xff; // nullable int8u null marker
+};
+
+struct WemoLevelCommandState
+{
+    bool workerActive = false;
+    bool hasPending = false;
+    uint8_t pendingPercent = 0;
+    std::chrono::steady_clock::time_point nextDispatchAt;
+};
 
 std::vector<BridgedWemoLight> gBridgedWemoLights;
 std::unordered_map<Device *, std::string> gWemoDeviceToUdn;
+std::unordered_map<Device *, LevelControlSettings> gLevelControlSettings;
+std::mutex gWemoLevelCommandMutex;
+std::unordered_map<std::string, WemoLevelCommandState> gWemoLevelCommands;
 
 // Setup composed device with two temperature sensors and a power source
 ComposedDevice gComposedDevice("Composed Device", "Bedroom");
@@ -573,26 +683,212 @@ void HandleDeviceTempSensorStatusChanged(DeviceTempSensor * dev, DeviceTempSenso
     }
 }
 
+BridgedWemoLight * FindWemoEntry(Device * dev)
+{
+    for (auto & entry : gBridgedWemoLights)
+    {
+        if (entry.device.get() == dev)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+std::string TruncateForZclString(std::string value, uint16_t maxReadLength)
+{
+    if (maxReadLength == 0)
+    {
+        return {};
+    }
+
+    const size_t maxChars = static_cast<size_t>(maxReadLength - 1);
+    if (value.size() > maxChars)
+    {
+        value.resize(maxChars);
+    }
+    return value;
+}
+
+Protocols::InteractionModel::Status WriteZclString(uint8_t * buffer, uint16_t maxReadLength, std::string value)
+{
+    MutableByteSpan zclSpan(buffer, maxReadLength);
+    value = TruncateForZclString(std::move(value), maxReadLength);
+    return (MakeZclCharString(zclSpan, value.c_str()) == CHIP_NO_ERROR) ? Protocols::InteractionModel::Status::Success :
+                                                                          Protocols::InteractionModel::Status::Failure;
+}
+
+std::string ProductNameForEntry(const BridgedWemoLight * entry)
+{
+    if (entry == nullptr)
+    {
+        return "Wemo Device";
+    }
+    if (!entry->modelName.empty())
+    {
+        return entry->modelName;
+    }
+    if (entry->is_dimmable)
+    {
+        return "Wemo Dimmer";
+    }
+    if (entry->is_plug)
+    {
+        return "Wemo Plug";
+    }
+    return "Wemo Light";
+}
+
+void ScheduleBasicInfoMetadataReports(Device * dev)
+{
+    ScheduleReportingCallback(dev, BridgedDeviceBasicInformation::Id, BridgedDeviceBasicInformation::Attributes::VendorName::Id);
+    ScheduleReportingCallback(dev, BridgedDeviceBasicInformation::Id, BridgedDeviceBasicInformation::Attributes::ProductName::Id);
+    ScheduleReportingCallback(dev, BridgedDeviceBasicInformation::Id,
+                              BridgedDeviceBasicInformation::Attributes::SoftwareVersionString::Id);
+    ScheduleReportingCallback(dev, BridgedDeviceBasicInformation::Id, BridgedDeviceBasicInformation::Attributes::ProductLabel::Id);
+    ScheduleReportingCallback(dev, BridgedDeviceBasicInformation::Id, BridgedDeviceBasicInformation::Attributes::SerialNumber::Id);
+    ScheduleReportingCallback(dev, BridgedDeviceBasicInformation::Id,
+                              BridgedDeviceBasicInformation::Attributes::ConfigurationVersion::Id);
+}
+
+bool UpdateWemoMetadata(BridgedWemoLight & entry, const wemo_bridge::WemoDevice & dev)
+{
+    bool changed = false;
+
+    auto update = [&changed](std::string & current, const std::string & next) {
+        if (current != next)
+        {
+            current = next;
+            changed = true;
+        }
+    };
+
+    update(entry.manufacturer, dev.manufacturer);
+    update(entry.modelName, dev.model_name);
+    update(entry.serialNumber, dev.serial_number);
+    update(entry.firmwareVersion, dev.firmware_version);
+    return changed;
+}
+
+void RunWemoLevelCommandWorker(std::string udn)
+{
+    while (true)
+    {
+        uint8_t percent = 0;
+        bool send = false;
+        std::chrono::steady_clock::time_point due;
+
+        {
+            std::lock_guard<std::mutex> lock(gWemoLevelCommandMutex);
+            auto it = gWemoLevelCommands.find(udn);
+            if (it == gWemoLevelCommands.end() || !it->second.hasPending)
+            {
+                if (it != gWemoLevelCommands.end())
+                {
+                    it->second.workerActive = false;
+                }
+                return;
+            }
+
+            auto now = std::chrono::steady_clock::now();
+            due = it->second.nextDispatchAt;
+            if (now >= due)
+            {
+                percent = it->second.pendingPercent;
+                it->second.hasPending = false;
+                it->second.nextDispatchAt = now + kMinWemoLevelCommandInterval;
+                send = true;
+            }
+        }
+
+        if (!send)
+        {
+            std::this_thread::sleep_until(due);
+            continue;
+        }
+
+        (void) gWemoAdapter.SetLevelPercent(udn, percent);
+    }
+}
+
+void DispatchWemoLevelCommand(const std::string & udn, uint8_t percent)
+{
+    bool sendNow = false;
+    bool startWorker = false;
+
+    {
+        std::lock_guard<std::mutex> lock(gWemoLevelCommandMutex);
+        auto & state = gWemoLevelCommands[udn];
+        auto now = std::chrono::steady_clock::now();
+        if (state.nextDispatchAt.time_since_epoch().count() == 0 || now >= state.nextDispatchAt)
+        {
+            state.nextDispatchAt = now + kMinWemoLevelCommandInterval;
+            state.hasPending = false;
+            sendNow = true;
+        }
+        else
+        {
+            state.pendingPercent = percent;
+            state.hasPending = true;
+            if (!state.workerActive)
+            {
+                state.workerActive = true;
+                startWorker = true;
+            }
+        }
+    }
+
+    if (sendNow)
+    {
+        std::thread([udn, percent]() { gWemoAdapter.SetLevelPercent(udn, percent); }).detach();
+    }
+    else if (startWorker)
+    {
+        std::thread(RunWemoLevelCommandWorker, udn).detach();
+    }
+}
+
 Protocols::InteractionModel::Status HandleReadBridgedDeviceBasicAttribute(Device * dev, chip::AttributeId attributeId,
                                                                           uint8_t * buffer, uint16_t maxReadLength)
 {
     using namespace BridgedDeviceBasicInformation::Attributes;
 
     ChipLogProgress(DeviceLayer, "HandleReadBridgedDeviceBasicAttribute: attrId=%d, maxReadLength=%d", attributeId, maxReadLength);
+    const BridgedWemoLight * entry = FindWemoEntry(dev);
 
     if ((attributeId == Reachable::Id) && (maxReadLength == 1))
     {
         *buffer = dev->IsReachable() ? 1 : 0;
     }
-    else if ((attributeId == NodeLabel::Id) && (maxReadLength == 32))
+    else if ((attributeId == VendorName::Id) && (maxReadLength >= 2))
     {
-        MutableByteSpan zclNameSpan(buffer, maxReadLength);
-        TEMPORARY_RETURN_IGNORED MakeZclCharString(zclNameSpan, dev->GetName());
+        return WriteZclString(buffer, maxReadLength, (entry != nullptr && !entry->manufacturer.empty()) ? entry->manufacturer : "Wemo");
     }
-    else if ((attributeId == UniqueID::Id) && (maxReadLength == 32))
+    else if ((attributeId == ProductName::Id) && (maxReadLength >= 2))
     {
-        MutableByteSpan zclUniqueIdSpan(buffer, maxReadLength);
-        TEMPORARY_RETURN_IGNORED MakeZclCharString(zclUniqueIdSpan, dev->GetUniqueId());
+        return WriteZclString(buffer, maxReadLength, ProductNameForEntry(entry));
+    }
+    else if ((attributeId == NodeLabel::Id) && (maxReadLength >= 2))
+    {
+        return WriteZclString(buffer, maxReadLength, dev->GetName());
+    }
+    else if ((attributeId == SoftwareVersionString::Id) && (maxReadLength >= 2))
+    {
+        return WriteZclString(buffer, maxReadLength,
+                              (entry != nullptr && !entry->firmwareVersion.empty()) ? entry->firmwareVersion : "unknown");
+    }
+    else if ((attributeId == ProductLabel::Id) && (maxReadLength >= 2))
+    {
+        return WriteZclString(buffer, maxReadLength, dev->GetName());
+    }
+    else if ((attributeId == SerialNumber::Id) && (maxReadLength >= 2))
+    {
+        return WriteZclString(buffer, maxReadLength,
+                              (entry != nullptr && !entry->serialNumber.empty()) ? entry->serialNumber : dev->GetUniqueId());
+    }
+    else if ((attributeId == UniqueID::Id) && (maxReadLength >= 2))
+    {
+        return WriteZclString(buffer, maxReadLength, dev->GetUniqueId());
     }
     else if ((attributeId == ConfigurationVersion::Id) && (maxReadLength == 4))
     {
@@ -683,6 +979,12 @@ Protocols::InteractionModel::Status HandleReadLevelControlAttribute(DeviceDimmab
     using namespace LevelControl::Attributes;
 
     ChipLogProgress(DeviceLayer, "HandleReadLevelControlAttribute: attrId=0x%04x, maxReadLength=%d", attributeId, maxReadLength);
+    LevelControlSettings settings;
+    auto settingsIt = gLevelControlSettings.find(static_cast<Device *>(dev));
+    if (settingsIt != gLevelControlSettings.end())
+    {
+        settings = settingsIt->second;
+    }
 
     if ((attributeId == CurrentLevel::Id) && (maxReadLength == 1))
     {
@@ -695,6 +997,22 @@ Protocols::InteractionModel::Status HandleReadLevelControlAttribute(DeviceDimmab
     else if ((attributeId == MaxLevel::Id) && (maxReadLength == 1))
     {
         *buffer = 254;
+    }
+    else if ((attributeId == Options::Id) && (maxReadLength == 1))
+    {
+        *buffer = settings.options;
+    }
+    else if ((attributeId == OnOffTransitionTime::Id) && (maxReadLength == 2))
+    {
+        memcpy(buffer, &settings.onOffTransitionTimeDs, sizeof(settings.onOffTransitionTimeDs));
+    }
+    else if ((attributeId == OnLevel::Id) && (maxReadLength == 1))
+    {
+        *buffer = settings.onLevel;
+    }
+    else if ((attributeId == DefaultMoveRate::Id) && (maxReadLength == 1))
+    {
+        *buffer = settings.defaultMoveRate;
     }
     else if ((attributeId == ClusterRevision::Id) && (maxReadLength == 2))
     {
@@ -723,16 +1041,7 @@ Protocols::InteractionModel::Status HandleWriteLevelControlAttribute(DeviceDimma
     {
         const auto now = std::chrono::steady_clock::now();
         const uint8_t matterLevel = *buffer;
-        BridgedWemoLight * matched = nullptr;
-
-        for (auto & entry : gBridgedWemoLights)
-        {
-            if (entry.device.get() == static_cast<Device *>(dev))
-            {
-                matched = &entry;
-                break;
-            }
-        }
+        BridgedWemoLight * matched = FindWemoEntry(static_cast<Device *>(dev));
 
         // Some controllers emit LevelControl writes as part of an OnOff toggle.
         // Preserve the current brightness in that window; level should only
@@ -781,8 +1090,36 @@ Protocols::InteractionModel::Status HandleWriteLevelControlAttribute(DeviceDimma
                     break;
                 }
             }
-            std::thread([udn, wemoPercent]() { gWemoAdapter.SetLevelPercent(udn, wemoPercent); }).detach();
+            DispatchWemoLevelCommand(udn, wemoPercent);
         }
+    }
+    else if (attributeId == LevelControl::Attributes::Options::Id)
+    {
+        gLevelControlSettings[static_cast<Device *>(dev)].options = *buffer;
+    }
+    else if (attributeId == LevelControl::Attributes::OnOffTransitionTime::Id)
+    {
+        uint16_t transitionTime = 0;
+        memcpy(&transitionTime, buffer, sizeof(transitionTime));
+        gLevelControlSettings[static_cast<Device *>(dev)].onOffTransitionTimeDs = transitionTime;
+    }
+    else if (attributeId == LevelControl::Attributes::OnLevel::Id)
+    {
+        const uint8_t onLevel = *buffer;
+        if (onLevel == 0)
+        {
+            return Protocols::InteractionModel::Status::ConstraintError;
+        }
+        gLevelControlSettings[static_cast<Device *>(dev)].onLevel = onLevel;
+    }
+    else if (attributeId == LevelControl::Attributes::DefaultMoveRate::Id)
+    {
+        const uint8_t defaultMoveRate = *buffer;
+        if (defaultMoveRate == 0)
+        {
+            return Protocols::InteractionModel::Status::ConstraintError;
+        }
+        gLevelControlSettings[static_cast<Device *>(dev)].defaultMoveRate = defaultMoveRate;
     }
     else
     {
@@ -813,6 +1150,7 @@ Protocols::InteractionModel::Status HandleWriteBridgedDeviceBasicAttribute(Devic
     dev->SetConfigurationVersion(dev->GetConfigurationVersion() + 1);
 
     HandleDeviceStatusChanged(dev, Device::kChanged_Name);
+    ScheduleReportingCallback(dev, BridgedDeviceBasicInformation::Id, BridgedDeviceBasicInformation::Attributes::ProductLabel::Id);
     ScheduleReportingCallback(dev, BridgedDeviceBasicInformation::Id,
                               BridgedDeviceBasicInformation::Attributes::ConfigurationVersion::Id);
     auto udnIt = gWemoDeviceToUdn.find(dev);
@@ -1409,6 +1747,7 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
     slot->udn = dev.udn;
     slot->is_dimmable = dev.supports_level;
     slot->is_plug = dev.is_plug;
+    UpdateWemoMetadata(*slot, dev);
     const std::string name = dev.friendly_name.empty() ? std::string("WeMo Device") : dev.friendly_name;
 
     EmberAfEndpointType * epType;
@@ -1481,6 +1820,7 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
 
     if (slot->is_dimmable)
     {
+        gLevelControlSettings[slot->device.get()] = LevelControlSettings {};
         emberAfLevelControlClusterServerInitCallback(slot->device->GetEndpointId());
         static_cast<DeviceDimmable *>(slot->device.get())->SetChangeCallback(&HandleDeviceDimmableStatusChanged);
     }
@@ -1505,6 +1845,11 @@ void RemovePublishedWemoDevice(BridgedWemoLight & entry)
 
     ChipLogProgress(DeviceLayer, "Removing stale WeMo endpoint: %s <- %s", entry.device->GetName(), entry.udn.c_str());
     gWemoDeviceToUdn.erase(entry.device.get());
+    gLevelControlSettings.erase(entry.device.get());
+    {
+        std::lock_guard<std::mutex> lock(gWemoLevelCommandMutex);
+        gWemoLevelCommands.erase(entry.udn);
+    }
     RemoveDeviceEndpoint(entry.device.get());
     entry.device.reset();
     entry.wemo_id = 0;
@@ -1528,12 +1873,20 @@ void UpdatePublishedWemoDevice(BridgedWemoLight & entry, const wemo_bridge::Wemo
     }
 
     entry.wemo_id = dev.wemo_id;
+    if (UpdateWemoMetadata(entry, dev))
+    {
+        entry.device->SetConfigurationVersion(entry.device->GetConfigurationVersion() + 1);
+        ScheduleBasicInfoMetadataReports(entry.device.get());
+        ChipLogProgress(DeviceLayer, "Updated WeMo Matter metadata: %s <- %s", entry.device->GetName(), entry.udn.c_str());
+    }
     const std::string name = dev.friendly_name.empty() ? std::string("WeMo Device") : dev.friendly_name;
     if (std::strcmp(entry.device->GetName(), name.c_str()) != 0)
     {
         entry.device->SetName(name.c_str());
         entry.device->SetConfigurationVersion(entry.device->GetConfigurationVersion() + 1);
         HandleDeviceStatusChanged(entry.device.get(), Device::kChanged_Name);
+        ScheduleReportingCallback(entry.device.get(), BridgedDeviceBasicInformation::Id,
+                                  BridgedDeviceBasicInformation::Attributes::ProductLabel::Id);
         ScheduleReportingCallback(entry.device.get(), BridgedDeviceBasicInformation::Id,
                                   BridgedDeviceBasicInformation::Attributes::ConfigurationVersion::Id);
         ChipLogProgress(DeviceLayer, "Updated WeMo Matter label: %s <- %s", name.c_str(), entry.udn.c_str());
@@ -1760,6 +2113,11 @@ void ApplicationShutdown() {}
 
 int main(int argc, char * argv[])
 {
+    if (argc > 1 && std::strcmp(argv[1], "--wemo-onboarding-payload") == 0)
+    {
+        return PrintOnboardingPayload(argc, argv);
+    }
+
     if (sChipNamedPipeCommands.Stop() != CHIP_NO_ERROR)
     {
         ChipLogError(NotSpecified, "Failed to stop CHIP NamedPipeCommands");

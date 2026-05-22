@@ -1,10 +1,10 @@
 # OpenWeMo Bridge Core
 
-`OpenWeMo Bridge Core` is the project name.
+This directory is the vendored WeMo LAN control layer used by the OpenWrt
+WeMo Matter Bridge firmware/package tree.
 
-This repository provides a local LAN control layer for WeMo devices and is designed to be used by a Matter bridge.
-
-Matter bridge integration (Google Home / Home app bridge flow) is planned for a future release of this project.
+The standalone source repository is no longer required for public builds. Keep
+changes here so the OpenWrt repository remains self-contained.
 
 ## Development Notes
 
@@ -37,7 +37,7 @@ Hardware target note:
 - You can run this project on Raspberry Pi devices, including Raspberry Pi Zero models, as long as toolchain and dependency requirements are met.
 - For Pi Zero class hardware, expect slower build/test times and prefer lightweight runtime settings.
 
-## Build
+## Standalone Developer Build
 
 From repo root:
 
@@ -145,7 +145,6 @@ These scripts expect local build artifacts and typically start/stop `wemo_ctrl` 
 
 ## Matter Bridge Integration Notes
 
-- Full Matter bridge packaging/integration is planned for a future release.
 - Keep `wemo_ctrl` running continuously.
 - Have bridge process link to `wemo_engine` or talk to IPC endpoint.
 - Use `we_get_cached_device_list()` for bridge status reconciliation. It returns
@@ -169,4 +168,5 @@ These scripts expect local build artifacts and typically start/stop `wemo_ctrl` 
 
 ## Notes
 
-- Repository name is `openwemo-bridge-core`.
+- `openwemo-bridge-core` remains the internal OpenWrt package name.
+- Public release users should follow the top-level OpenWrt repository docs.

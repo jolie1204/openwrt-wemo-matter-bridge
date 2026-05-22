@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wemo-matter-bridge
-PKG_RELEASE:=16
+PKG_RELEASE:=18
 
 PKG_SOURCE_URL:=https://github.com/jolie1204/connectedhomeip.git
 PKG_SOURCE_PROTO:=git-with-metadata
@@ -41,6 +41,8 @@ endef
 
 define Package/wemo-matter-bridge/conffiles
 /data/wemo-matter/
+/etc/wemo-matter-bridge/
+/etc/config/wemo-matter-bridge
 endef
 
 CONFIGURE_OPTIONS:= \
@@ -104,12 +106,15 @@ define Build/Compile
 endef
 
 define Package/wemo-matter-bridge/install
-	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/libexec $(1)/etc/init.d $(1)/etc/rc.button
+	$(INSTALL_DIR) $(1)/usr/sbin $(1)/usr/libexec $(1)/etc/init.d $(1)/etc/rc.button $(1)/etc/profile.d $(1)/etc/wemo-matter-bridge $(1)/etc/config
 	$(INSTALL_BIN) $(OUT_DIR)/wemo-bridge-app $(1)/usr/sbin/wemo-bridge-app
+	$(INSTALL_BIN) ./files/wemo-matter-bridge $(1)/usr/sbin/wemo-matter-bridge
 	$(INSTALL_BIN) ./files/wemo-matter-bridge.init $(1)/etc/init.d/wemo-matter-bridge
 	$(INSTALL_BIN) ./files/wemo-indicator $(1)/usr/libexec/wemo-indicator
 	$(INSTALL_BIN) ./files/wemo-indicator.init $(1)/etc/init.d/wemo-indicator
 	$(INSTALL_BIN) ./files/button $(1)/etc/rc.button/button
+	$(INSTALL_DATA) ./files/wemo-matter-bridge.profile $(1)/etc/profile.d/99-wemo-matter-bridge.sh
+	$(INSTALL_CONF) ./files/wemo-matter-bridge.config $(1)/etc/config/wemo-matter-bridge
 endef
 
 $(eval $(call BuildPackage,wemo-matter-bridge))

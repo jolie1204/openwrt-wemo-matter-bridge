@@ -15,10 +15,14 @@ usage() {
   cat <<'EOF'
 Usage: scripts/install_bridge_stack.sh [options]
 
-Build and deploy WeMo bridge binaries into a stack bin directory.
+Legacy developer helper for non-OpenWrt Linux hosts.
+
+Public Raspberry Pi/OpenWrt releases are built from the repository root with
+scripts/release/build_rpi_release.sh. This helper still supports old local
+standalone workspaces when explicitly needed.
 
 Options:
-  --workspace <path>       Workspace root containing sibling repos.
+  --workspace <path>       Legacy workspace root containing sibling repos.
   --openwemo-root <path>   Path to openwemo-bridge-core.
   --bin-dir <path>         Target bin directory for deployed binaries.
   --skip-openwemo-build    Skip building openwemo-bridge-core.
@@ -142,4 +146,3 @@ else
   log "  ${STACK_SCRIPT} start"
   log "  ${STACK_SCRIPT} status"
 fi
-

@@ -6,7 +6,7 @@
 #define IPC_DEFAULT_HOST "127.0.0.1"
 #define IPC_DEFAULT_PORT 49153
 
-#define IPC_DATA_MAX 2048
+#define IPC_DATA_MAX 8192
 #define WE_PROTO_MAGIC 0x57454d4fU /* "WEMO" */
 #define WE_PROTO_VERSION 2
 
@@ -281,6 +281,10 @@ struct we_health_snapshot {
 #define WE_DEVICE_LIST_MAX_ITEMS 16
 #define WE_DEVICE_UDN_LEN 48
 #define WE_DEVICE_NAME_LEN 48
+#define WE_DEVICE_MODEL_LEN 64
+#define WE_DEVICE_SERIAL_LEN 32
+#define WE_DEVICE_FIRMWARE_LEN 64
+#define WE_DEVICE_MANUFACTURER_LEN 64
 
 struct we_device_info {
     int32_t wemo_id;
@@ -290,6 +294,10 @@ struct we_device_info {
     int32_t level;        /* 0-100, or -1 if unsupported */
     char udn[WE_DEVICE_UDN_LEN];
     char friendly_name[WE_DEVICE_NAME_LEN];
+    char model_name[WE_DEVICE_MODEL_LEN];
+    char serial_number[WE_DEVICE_SERIAL_LEN];
+    char firmware_version[WE_DEVICE_FIRMWARE_LEN];
+    char manufacturer[WE_DEVICE_MANUFACTURER_LEN];
 };
 
 struct we_device_list {
