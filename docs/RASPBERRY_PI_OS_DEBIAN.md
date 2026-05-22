@@ -23,7 +23,8 @@ sudo apt update
 sudo apt install -y \
   build-essential git rsync patch python3 python3-venv pkg-config \
   ninja-build clang lld libsqlite3-dev libssl-dev libupnp-dev \
-  libavahi-client-dev libavahi-common-dev libgio-2.0-dev-bin \
+  libavahi-client-dev libavahi-common-dev libglib2.0-dev \
+  libgio-2.0-dev-bin \
   qrencode dpkg-dev
 ```
 
