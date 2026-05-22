@@ -42,6 +42,6 @@ if [[ -f "$PATCH_FILE" ]]; then
   fi
 fi
 
-HOME=/tmp /bin/bash "${CHIP_ROOT}/scripts/examples/gn_build_example.sh" . out/ethernet
+HOME="${WEMO_CHIP_HOME:-/tmp}" /bin/bash "${CHIP_ROOT}/scripts/examples/gn_build_example.sh" . out/ethernet
 
 echo "Built: $(pwd)/out/ethernet/wemo-bridge-app"

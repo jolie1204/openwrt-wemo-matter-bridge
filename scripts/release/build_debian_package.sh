@@ -119,6 +119,7 @@ if [[ "$KEEP_WORK" -eq 0 ]]; then
   rm -rf "$WORK_DIR"
 fi
 mkdir -p "$WORK_DIR/src" "$WORK_DIR/pkg"
+mkdir -p "$WORK_DIR/tmp" "$WORK_DIR/cache/cipd"
 
 SRC_ROOT="$WORK_DIR/src"
 OPENWEMO_BUILD="$SRC_ROOT/openwemo-bridge-core"
@@ -181,9 +182,11 @@ if [[ "$SKIP_MATTER_BUILD" -eq 0 ]]; then
   echo "==> Building Matter bridge app"
   (
     cd "$BRIDGE_BUILD/matter-bridge-app"
+    export TMPDIR="$WORK_DIR/tmp"
+    export WEMO_CHIP_HOME="$WORK_DIR/tmp"
+    export CIPD_CACHE_DIR="$WORK_DIR/cache/cipd"
     WEMO_CHIP_STATE_DIR=/var/lib/wemo-matter-bridge/chip \
     WEMO_ENGINE_RPATH=/usr/lib \
-    HOME=/tmp \
     ./build_wemo_bridge.sh
   )
 fi
