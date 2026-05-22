@@ -56,6 +56,23 @@ if [[ -f "$PATCH_FILE" ]]; then
   fi
 fi
 
-HOME="${WEMO_CHIP_HOME:-/tmp}" /bin/bash "${CHIP_ROOT}/scripts/examples/gn_build_example.sh" . out/ethernet
+build_bridge_app() {
+  local ninja_jobs="${WEMO_NINJA_JOBS:-${JOBS:-}}"
+
+  # gn_build_example.sh always lets Ninja pick its default parallelism. That is
+  # too aggressive for 2 GB Raspberry Pi build hosts, so keep the same flow but
+  # pass an explicit Ninja job limit when requested.
+  # shellcheck disable=SC1091
+  source "${CHIP_ROOT}/scripts/activate.sh"
+
+  gn gen --check --fail-on-unused-args --root=. out/ethernet --args=""
+  if [[ -n "$ninja_jobs" ]]; then
+    ninja -C out/ethernet -j "$ninja_jobs"
+  else
+    ninja -C out/ethernet
+  fi
+}
+
+HOME="${WEMO_CHIP_HOME:-/tmp}" build_bridge_app
 
 echo "Built: $(pwd)/out/ethernet/wemo-bridge-app"
