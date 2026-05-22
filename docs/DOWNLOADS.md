@@ -6,15 +6,16 @@ The GitHub Releases page is organized by how the bridge will be used:
 https://github.com/jolie1204/openwrt-wemo-matter-bridge/releases
 ```
 
-## Recommended: Raspberry Pi OpenWrt Firmware
+## Recommended: WeMo to Matter Bridge for Raspberry Pi
 
 Use this when you want a Raspberry Pi to become a dedicated WeMo-to-Matter
-bridge appliance.
+bridge appliance. The image uses OpenWrt, but users do not need to know
+OpenWrt internals to flash it and pair the bridge.
 
 Release title:
 
 ```text
-OpenWeMo Raspberry Pi OpenWrt Firmware vX.Y.Z
+WeMo to Matter Bridge for Raspberry Pi vX.Y.Z
 ```
 
 Download one image:
@@ -42,7 +43,7 @@ replace the whole firmware image.
 Release title:
 
 ```text
-OpenWeMo OpenWrt Packages vX.Y.Z
+WeMo to Matter Bridge Packages for OpenWrt vX.Y.Z
 ```
 
 Install all packages for the target architecture:
@@ -61,7 +62,7 @@ Debian instead of booting OpenWrt.
 Release title:
 
 ```text
-OpenWeMo Raspberry Pi OS Debian Package vX.Y.Z
+WeMo to Matter Bridge for Raspberry Pi OS vX.Y.Z
 ```
 
 Download and install:

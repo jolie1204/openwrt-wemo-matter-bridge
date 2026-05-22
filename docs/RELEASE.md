@@ -89,13 +89,13 @@ Use separate GitHub releases for each usage:
 
 ```sh
 gh release create openwrt-rpi-v0.1.2 dist/openwrt-rpi/* \
-  --title "OpenWeMo Raspberry Pi OpenWrt Firmware v0.1.2"
+  --title "WeMo to Matter Bridge for Raspberry Pi v0.1.2"
 
 gh release create openwrt-packages-v0.1.2 dist/openwrt-packages/* \
-  --title "OpenWeMo OpenWrt Packages v0.1.2"
+  --title "WeMo to Matter Bridge Packages for OpenWrt v0.1.2"
 
 gh release create raspios-deb-v0.1.2 dist/raspios-deb/* \
-  --title "OpenWeMo Raspberry Pi OS Debian Package v0.1.2"
+  --title "WeMo to Matter Bridge for Raspberry Pi OS v0.1.2"
 ```
 
 ## Create a Release Tag

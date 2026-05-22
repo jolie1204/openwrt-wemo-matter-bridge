@@ -78,6 +78,6 @@ jobs:
         run: |
           scripts/release/stage_usage_release_assets.sh "${GITHUB_REF_NAME}"
           gh release create "${GITHUB_REF_NAME}" dist/openwrt-rpi/* \
-            --title "OpenWeMo Raspberry Pi OpenWrt Firmware ${GITHUB_REF_NAME#openwrt-rpi-}" \
+            --title "WeMo to Matter Bridge for Raspberry Pi ${GITHUB_REF_NAME#openwrt-rpi-}" \
             --notes-file dist/openwrt-rpi/README.txt \
             --repo "${GITHUB_REPOSITORY}"
