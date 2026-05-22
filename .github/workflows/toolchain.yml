@@ -1,16 +1,7 @@
 name: Build Toolchains
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/toolchain.yml'
-      - 'toolchain/**'
-  push:
-    paths:
-      - '.github/workflows/toolchain.yml'
-      - 'toolchain/**'
-    branches-ignore:
-      - master
+  workflow_dispatch:
 
 permissions:
   contents: read
