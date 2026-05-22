@@ -2,7 +2,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 #include <errno.h>
 #include <assert.h>
 #include <fcntl.h>
@@ -30,6 +29,17 @@
 #include "wemo_insight.h"
 #include "logger.h"
 #include "wemo_engine.h"
+
+/*
+ * Debian libupnp's list.h defines bool/true and then undefines them, which can
+ * erase stdbool.h macros after the UPnP headers are pulled in through local
+ * headers above.
+ */
+#ifndef bool
+#define bool _Bool
+#define true 1
+#define false 0
+#endif
 
 extern char wemo_device_db[];
 extern char wemo_state_db[];

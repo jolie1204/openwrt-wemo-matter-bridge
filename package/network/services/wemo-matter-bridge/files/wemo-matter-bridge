@@ -1,12 +1,15 @@
 #!/bin/sh
 
-CONFIG_DIR=/etc/wemo-matter-bridge
+DEFAULT_ENV=${WEMO_DEFAULT_ENV:-/etc/default/wemo-matter-bridge}
+[ -r "$DEFAULT_ENV" ] && . "$DEFAULT_ENV"
+
+CONFIG_DIR=${WEMO_CONFIG_DIR:-/etc/wemo-matter-bridge}
 UCI_CONFIG=wemo-matter-bridge
-STATE_DIR=/data/wemo-matter
+STATE_DIR=${WEMO_STATE_DIR:-/data/wemo-matter}
 CHIP_DIR=$STATE_DIR/chip
 ONBOARDING_JSON=$CONFIG_DIR/matter-onboarding.json
 FACTORY_INI=$CHIP_DIR/chip_factory.ini
-BRIDGE_APP=/usr/sbin/wemo-bridge-app
+BRIDGE_APP=${WEMO_BRIDGE_APP:-/usr/sbin/wemo-bridge-app}
 QR_PNG=/tmp/wemo-matter-bridge-qr.png
 WWW_QR_PNG=/www/wemo-matter-bridge-qr.png
 
@@ -270,7 +273,7 @@ Commands:
   qr                  Print QR payload, manual code, and ASCII QR when qrencode is installed
   reset-onboarding    Regenerate onboarding data; controllers may need recommissioning
   status              Show bridge process and onboarding status
-  logs                Follow relevant OpenWrt logs
+  logs                Follow relevant OpenWrt/systemd logs
   scan-wemo           Trigger WeMo discovery and list devices through wemo_client
   restart             Restart wemo_ctrl and wemo-matter-bridge services
 EOF
@@ -292,14 +295,22 @@ case "$1" in
 		status_cmd
 		;;
 	logs)
-		logread -f -e wemo -e matter -e CHIP
+		if command -v logread >/dev/null 2>&1; then
+			logread -f -e wemo -e matter -e CHIP
+		else
+			journalctl -u wemo_ctrl -u wemo-matter-bridge -f
+		fi
 		;;
 	scan-wemo)
 		scan_wemo
 		;;
 	restart)
-		/etc/init.d/wemo_ctrl restart
-		/etc/init.d/wemo-matter-bridge restart
+		if [ -x /etc/init.d/wemo_ctrl ] && [ -x /etc/init.d/wemo-matter-bridge ]; then
+			/etc/init.d/wemo_ctrl restart
+			/etc/init.d/wemo-matter-bridge restart
+		else
+			systemctl restart wemo_ctrl wemo-matter-bridge
+		fi
 		;;
 	help|-h|--help|"")
 		usage

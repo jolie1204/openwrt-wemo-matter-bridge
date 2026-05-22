@@ -9,6 +9,7 @@ validation before they should be described as supported.
 |---|---|---|---|
 | Raspberry Pi 4 | `bcm27xx/bcm2711`, `rpi-4-wemo-matter-bridge` | Primary | Recommended release image target. |
 | Raspberry Pi 5 | `bcm27xx/bcm2712`, `rpi-5-wemo-matter-bridge` | Experimental | Build target exists; validate before broad release. |
+| Raspberry Pi OS 64-bit | Debian package, `arm64` | Experimental | Native `.deb` package path; build on Raspberry Pi OS, not from OpenWrt APKs. |
 | Belkin MT7628 bridge | `ramips/mt76x8`, `wemo-matter-bridge` | Project appliance | Existing custom hardware target. |
 
 ## WeMo Devices

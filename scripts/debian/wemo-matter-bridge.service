@@ -1,0 +1,19 @@
+[Unit]
+Description=WeMo to Matter bridge
+After=network-online.target wemo_ctrl.service
+Wants=network-online.target
+Requires=wemo_ctrl.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/wemo-matter-bridge
+ExecStartPre=/usr/bin/install -d -m 0700 -o root -g root /var/lib/wemo-matter-bridge /var/lib/wemo-matter-bridge/chip /etc/wemo-matter-bridge
+ExecStartPre=/usr/sbin/wemo-matter-bridge onboarding
+ExecStart=/usr/libexec/wemo-matter-bridge/start-bridge
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -17,6 +17,7 @@ product unless that certification is actually completed.
 For Raspberry Pi users, start here:
 
 - [Raspberry Pi Quick Start](docs/RASPBERRY_PI_QUICKSTART.md)
+- [Raspberry Pi OS Debian Package](docs/RASPBERRY_PI_OS_DEBIAN.md)
 - [Matter Onboarding](docs/MATTER_ONBOARDING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Compatibility](docs/COMPATIBILITY.md)
@@ -40,6 +41,7 @@ This fork adds Wemo bridge specific behavior on top of upstream OpenWrt:
 
 - Raspberry Pi 4 image profile for `bcm27xx/bcm2711`
 - experimental Raspberry Pi 5 image profile for `bcm27xx/bcm2712`
+- experimental Raspberry Pi OS 64-bit `.deb` packaging path
 - `wemo-matter-bridge` target profile for the Belkin MT7628 bridge hardware
 - native `openwemo-bridge-core` package with source vendored in this tree
 - native `wemo-matter-bridge` package with source vendored in this tree

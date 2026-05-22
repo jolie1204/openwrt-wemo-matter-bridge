@@ -73,6 +73,7 @@ openwemo_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/netwo
 wemo_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/network/services/wemo-matter-bridge/Makefile)"
 copy_package_matches "*/*/openwemo-bridge-core*-r${openwemo_release}.[ia]pk" || true
 copy_package_matches "*/*/wemo-matter-bridge*-r${wemo_release}.[ia]pk" || true
+copy_matches './bin/debian/openwemo-matter-bridge-*.deb' || true
 
 if [[ -f docs/release-notes-template.md ]]; then
   cp docs/release-notes-template.md "$DIST_DIR/RELEASE_NOTES_TEMPLATE.md"
