@@ -21,6 +21,20 @@ copy_matches() {
   [[ "$found" -eq 1 ]]
 }
 
+copy_image_matches() {
+  local pattern="$1"
+  local target="$2"
+  local variant="$3"
+  local found=0
+
+  while IFS= read -r -d '' file; do
+    cp "$file" "$DIST_DIR/openwemo-${target}-${TAG}-${variant}.img.gz"
+    found=1
+  done < <(find . -path "$pattern" -type f -print0 2>/dev/null)
+
+  [[ "$found" -eq 1 ]]
+}
+
 copy_package_matches() {
   local pattern="$1"
   local found=0
@@ -38,6 +52,7 @@ copy_package_matches() {
     base="$(basename "$file")"
     ext="${base##*.}"
     stem="${base%.*}"
+    stem="${stem//\~/.}"
     cp "$file" "$DIST_DIR/${stem}-${arch}.${ext}"
     found=1
   done < <(find ./bin/packages -path "$pattern" -type f -print0 2>/dev/null)
@@ -45,10 +60,14 @@ copy_package_matches() {
   [[ "$found" -eq 1 ]]
 }
 
-copy_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*factory.img.gz' || true
-copy_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*sysupgrade.img.gz' || true
-copy_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*factory.img.gz' || true
-copy_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*sysupgrade.img.gz' || true
+copy_image_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*ext4-factory.img.gz' rpi4 ext4-factory || true
+copy_image_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*ext4-sysupgrade.img.gz' rpi4 ext4-sysupgrade || true
+copy_image_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*squashfs-factory.img.gz' rpi4 squashfs-factory || true
+copy_image_matches './bin/targets/bcm27xx/bcm2711/*rpi-4-wemo-matter-bridge*squashfs-sysupgrade.img.gz' rpi4 squashfs-sysupgrade || true
+copy_image_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*ext4-factory.img.gz' rpi5 ext4-factory || true
+copy_image_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*ext4-sysupgrade.img.gz' rpi5 ext4-sysupgrade || true
+copy_image_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*squashfs-factory.img.gz' rpi5 squashfs-factory || true
+copy_image_matches './bin/targets/bcm27xx/bcm2712/*rpi-5-wemo-matter-bridge*squashfs-sysupgrade.img.gz' rpi5 squashfs-sysupgrade || true
 
 openwemo_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/network/services/openwemo-bridge-core/Makefile)"
 wemo_release="$(awk -F:= '/^PKG_RELEASE:=/ { print $2; exit }' package/network/services/wemo-matter-bridge/Makefile)"
