@@ -12,20 +12,34 @@ CHIP_ROOT="$(cd ../../connectedhomeip && pwd -P)"
 PATCH_FILE="$(pwd -P)/patches/connectedhomeip/unit-localization-startup.patch"
 
 ensure_chip_submodules() {
+  local submodules=(
+    third_party/pigweed/repo
+    third_party/jsoncpp/repo
+    third_party/nlassert/repo
+    third_party/nlio/repo
+    third_party/mbedtls/repo
+    third_party/boringssl/repo/src
+    third_party/perfetto/repo
+    third_party/openthread/repo
+    third_party/editline/repo
+  )
+  local missing=0
+  local path
+
   if [[ "${WEMO_SKIP_CHIP_SUBMODULE_BOOTSTRAP:-0}" == "1" ]]; then
     return 0
   fi
 
-  # Fresh CHIP checkouts commonly fail here because activate.sh expects Pigweed.
-  if [[ ! -f "${CHIP_ROOT}/third_party/pigweed/repo/pw_env_setup/util.sh" ]]; then
+  for path in "${submodules[@]}"; do
+    if [[ ! -d "${CHIP_ROOT}/${path}" || -z "$(find "${CHIP_ROOT}/${path}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+      missing=1
+      break
+    fi
+  done
+
+  if [[ "$missing" -eq 1 ]]; then
     echo "Bootstrapping required CHIP submodules for Linux bridge build..."
-    git -C "${CHIP_ROOT}" submodule update --init --recursive \
-      third_party/pigweed/repo \
-      third_party/jsoncpp/repo \
-      third_party/nlassert/repo \
-      third_party/nlio/repo \
-      third_party/mbedtls/repo \
-      third_party/boringssl/repo/src
+    git -C "${CHIP_ROOT}" submodule update --init --recursive "${submodules[@]}"
   fi
 }
 
