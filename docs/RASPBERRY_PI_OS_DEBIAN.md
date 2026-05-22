@@ -23,7 +23,8 @@ sudo apt update
 sudo apt install -y \
   build-essential git rsync patch python3 python3-venv pkg-config \
   ninja-build clang lld libsqlite3-dev libssl-dev libupnp-dev \
-  libavahi-client-dev libavahi-common-dev qrencode dpkg-dev
+  libavahi-client-dev libavahi-common-dev libgio-2.0-dev-bin \
+  qrencode dpkg-dev
 ```
 
 The Matter SDK build may require additional packages depending on the Raspberry
