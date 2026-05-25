@@ -91,8 +91,9 @@ release, that is also the file normal users should flash to an SD card or eMMC.
 5. Find the Raspberry Pi IP address from your router DHCP table.
 6. SSH into the bridge: `ssh root@<bridge-ip>`.
 7. Run: `wemo-matter-bridge status`.
-8. Run: `wemo-matter-bridge qr`.
-9. In Apple Home or Google Home, add a Matter accessory and scan the QR code.
+8. Run: `wemo-matter-bridge health`.
+9. Run: `wemo-matter-bridge qr`.
+10. In Apple Home or Google Home, add a Matter accessory and scan the QR code.
 
 The QR code pairs the bridge once. Individual WeMo switches, plugs, and dimmers
 then appear as bridged endpoints behind the bridge.
@@ -101,6 +102,8 @@ then appear as bridged endpoints behind the bridge.
 
 - The image generates unique Matter onboarding credentials on first boot.
 - The ext4 root filesystem expands on first boot to use the SD card or eMMC.
+- The OpenWrt watchdog restarts the bridge stack after repeated runtime health
+  failures.
 - WeMo discovery is local to your LAN and requires multicast/SSDP visibility.
 - This project does not claim official Matter certification.
 EOF
@@ -137,10 +140,13 @@ You normally need:
 4. Install packages: `apk add --allow-untrusted /tmp/*.apk`.
 5. Enable services: `/etc/init.d/wemo_ctrl enable`.
 6. Enable services: `/etc/init.d/wemo-matter-bridge enable`.
-7. Start services: `/etc/init.d/wemo_ctrl start`.
-8. Start services: `/etc/init.d/wemo-matter-bridge start`.
-9. Run: `wemo-matter-bridge qr`.
-10. In Apple Home or Google Home, add a Matter accessory and scan the QR code.
+7. Enable services: `/etc/init.d/wemo-matter-bridge-watchdog enable`.
+8. Start services: `/etc/init.d/wemo_ctrl start`.
+9. Start services: `/etc/init.d/wemo-matter-bridge start`.
+10. Start services: `/etc/init.d/wemo-matter-bridge-watchdog start`.
+11. Run: `wemo-matter-bridge health`.
+12. Run: `wemo-matter-bridge qr`.
+13. In Apple Home or Google Home, add a Matter accessory and scan the QR code.
 
 The QR code pairs the bridge once. Individual WeMo devices appear as bridged
 Matter endpoints.

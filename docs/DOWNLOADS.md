@@ -29,6 +29,8 @@ Flash the image with Raspberry Pi Imager or balenaEtcher, boot with Ethernet
 connected, SSH into the device, and run:
 
 ```sh
+wemo-matter-bridge status
+wemo-matter-bridge health
 wemo-matter-bridge qr
 ```
 

@@ -53,13 +53,19 @@ resize on the next boot.
 wemo-matter-bridge status
 ```
 
-8. Print the Matter QR code:
+8. Check bridge health:
+
+```sh
+wemo-matter-bridge health
+```
+
+9. Print the Matter QR code:
 
 ```sh
 wemo-matter-bridge qr
 ```
 
-9. In Apple Home or Google Home, add a Matter accessory and scan the QR code.
+10. In Apple Home or Google Home, add a Matter accessory and scan the QR code.
 
 The QR code pairs the bridge itself. Individual WeMo switches, plugs, and
 dimmers appear as bridged endpoints after commissioning.
