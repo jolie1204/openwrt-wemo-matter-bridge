@@ -50,6 +50,13 @@ wemo-matter-bridge reset-onboarding
 
 ## WeMo Devices Missing
 
+Check bridge health first:
+
+```sh
+wemo-matter-bridge health
+logread | grep wemo-bridge-watchdog
+```
+
 Run discovery:
 
 ```sh
@@ -68,6 +75,19 @@ Common causes:
 - multicast/SSDP is blocked
 - WeMo device is offline
 - controller app has stale Matter endpoint metadata
+- the local device/state database is locked or unreadable
+
+The OpenWrt image includes `wemo-matter-bridge-watchdog`. It waits through the
+initial discovery grace period, then restarts `wemo_ctrl` and
+`wemo-matter-bridge` after repeated health failures. Configure it with:
+
+```sh
+uci show wemo-matter-bridge
+uci set wemo-matter-bridge.main.watchdog_enabled='1'
+uci set wemo-matter-bridge.main.watchdog_failures='3'
+uci commit wemo-matter-bridge
+/etc/init.d/wemo-matter-bridge-watchdog restart
+```
 
 If device types or names changed after an upgrade, remove the bridge from the
 controller app and commission it again.

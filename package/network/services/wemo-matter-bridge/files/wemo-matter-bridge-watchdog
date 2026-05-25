@@ -1,0 +1,197 @@
+#!/bin/sh
+
+UCI_CONFIG=wemo-matter-bridge
+STATE_DIR=/data/wemo-matter
+DEVICE_DB=$STATE_DIR/wemo_device.db
+STATE_DB=$STATE_DIR/wemo_state.db
+INTERVAL_SECS=60
+INITIAL_GRACE_SECS=180
+FAILURE_THRESHOLD=3
+MIN_ACTIVE_DEVICES=1
+SQLITE_TIMEOUT_MS=1000
+UDP_RECVQ_THRESHOLD=98304
+LOCK=/tmp/wemo-matter-bridge-watchdog.lock
+
+log()
+{
+	logger -t wemo-bridge-watchdog "$*"
+}
+
+cfg_get()
+{
+	local opt="$1"
+	local default="$2"
+	local value
+
+	value="$(uci -q get "$UCI_CONFIG.main.$opt" 2>/dev/null)"
+	[ -n "$value" ] && printf '%s\n' "$value" || printf '%s\n' "$default"
+}
+
+is_enabled()
+{
+	case "$1" in
+		1|on|ON|true|TRUE|yes|YES|enabled|ENABLED) return 0 ;;
+	esac
+	return 1
+}
+
+load_config()
+{
+	ENABLED="$(cfg_get watchdog_enabled 1)"
+	INTERVAL_SECS="$(cfg_get watchdog_interval "$INTERVAL_SECS")"
+	INITIAL_GRACE_SECS="$(cfg_get watchdog_initial_grace "$INITIAL_GRACE_SECS")"
+	FAILURE_THRESHOLD="$(cfg_get watchdog_failures "$FAILURE_THRESHOLD")"
+	MIN_ACTIVE_DEVICES="$(cfg_get watchdog_min_active_devices "$MIN_ACTIVE_DEVICES")"
+	UDP_RECVQ_THRESHOLD="$(cfg_get watchdog_udp_recvq_threshold "$UDP_RECVQ_THRESHOLD")"
+
+	case "$INTERVAL_SECS" in *[!0-9]*|"") INTERVAL_SECS=60 ;; esac
+	case "$INITIAL_GRACE_SECS" in *[!0-9]*|"") INITIAL_GRACE_SECS=180 ;; esac
+	case "$FAILURE_THRESHOLD" in *[!0-9]*|"") FAILURE_THRESHOLD=3 ;; esac
+	case "$MIN_ACTIVE_DEVICES" in *[!0-9]*|"") MIN_ACTIVE_DEVICES=1 ;; esac
+	case "$UDP_RECVQ_THRESHOLD" in *[!0-9]*|"") UDP_RECVQ_THRESHOLD=98304 ;; esac
+	[ "$INTERVAL_SECS" -ge 10 ] 2>/dev/null || INTERVAL_SECS=10
+	[ "$FAILURE_THRESHOLD" -ge 1 ] 2>/dev/null || FAILURE_THRESHOLD=1
+}
+
+query_device_health()
+{
+	[ -s "$DEVICE_DB" ] || return 1
+	[ -s "$STATE_DB" ] || return 1
+	command -v sqlite3 >/dev/null 2>&1 || return 1
+
+	sqlite3 -batch -cmd ".timeout $SQLITE_TIMEOUT_MS" "$DEVICE_DB" \
+		"ATTACH '$STATE_DB' AS state_db;
+		 SELECT
+		   (SELECT COUNT(*) FROM main.wemo_device WHERE retired = 0),
+		   (SELECT COUNT(*)
+		      FROM main.wemo_device d
+		      JOIN state_db.state s ON s.wemo_id = d.wemo_id
+		     WHERE d.retired = 0 AND s.is_online = 1);" 2>/dev/null
+}
+
+udp_recvq_total()
+{
+	local pid="$1"
+
+	[ -n "$pid" ] || return 1
+	netstat -unap 2>/dev/null | awk -v pid="$pid/" '
+		$0 ~ pid {
+			sum += $2
+		}
+		END {
+			print sum + 0
+		}
+	'
+}
+
+restart_stack()
+{
+	local reason="$1"
+
+	(
+		lock -n "$LOCK" || exit 0
+		log "restarting bridge stack: $reason"
+		/etc/init.d/wemo-matter-bridge stop >/dev/null 2>&1 || true
+		sleep 2
+		/etc/init.d/wemo_ctrl restart >/dev/null 2>&1 || true
+		sleep 10
+		/etc/init.d/wemo-matter-bridge start >/dev/null 2>&1 || true
+		log "bridge stack restart completed"
+		lock -u "$LOCK"
+	) &
+}
+
+check_once()
+{
+	local reason="" bridge_pid ctrl_pid db_out active online recvq
+
+	ctrl_pid="$(pidof wemo_ctrl)"
+	bridge_pid="$(pidof wemo-bridge-app)"
+	[ -n "$ctrl_pid" ] || reason="wemo_ctrl is not running"
+	[ -n "$bridge_pid" ] || reason="wemo-bridge-app is not running"
+
+	if [ -z "$reason" ]; then
+		db_out="$(query_device_health)" || reason="device/state database is unreadable or locked"
+	fi
+
+	if [ -z "$reason" ]; then
+		active="${db_out%|*}"
+		online="${db_out#*|}"
+		case "$active:$online" in
+			*[!0-9:]*|:*) reason="device/state database returned invalid health data" ;;
+			*)
+				if [ "$active" -ge "$MIN_ACTIVE_DEVICES" ] 2>/dev/null && [ "$online" -eq 0 ] 2>/dev/null; then
+					reason="all $active active WeMo devices are offline"
+				fi
+				;;
+		esac
+	fi
+
+	if [ -z "$reason" ] && [ "$UDP_RECVQ_THRESHOLD" -gt 0 ] 2>/dev/null; then
+		recvq="$(udp_recvq_total "$bridge_pid")"
+		if [ -n "$recvq" ] && [ "$recvq" -gt "$UDP_RECVQ_THRESHOLD" ] 2>/dev/null; then
+			reason="wemo-bridge-app UDP receive queue is high ($recvq bytes)"
+		fi
+	fi
+
+	if [ -n "$reason" ]; then
+		printf '%s\n' "$reason"
+		return 1
+	fi
+
+	if [ -n "$db_out" ]; then
+		active="${db_out%|*}"
+		online="${db_out#*|}"
+		log "healthy: active=$active online=$online"
+	fi
+	return 0
+}
+
+run_forever()
+{
+	local failures=0 reason
+
+	load_config
+	is_enabled "$ENABLED" || {
+		log "disabled by UCI"
+		exit 0
+	}
+
+	log "started interval=${INTERVAL_SECS}s failures=${FAILURE_THRESHOLD} grace=${INITIAL_GRACE_SECS}s"
+	sleep "$INITIAL_GRACE_SECS"
+
+	while true; do
+		reason="$(check_once)" || {
+			failures=$((failures + 1))
+			log "health failure $failures/$FAILURE_THRESHOLD: $reason"
+			if [ "$failures" -ge "$FAILURE_THRESHOLD" ]; then
+				restart_stack "$reason"
+				failures=0
+				sleep "$INITIAL_GRACE_SECS"
+				continue
+			fi
+			sleep "$INTERVAL_SECS"
+			continue
+		}
+		failures=0
+		sleep "$INTERVAL_SECS"
+	done
+}
+
+case "$1" in
+	once)
+		load_config
+		check_once
+		;;
+	restart)
+		shift
+		restart_stack "${*:-manual request}"
+		;;
+	""|run)
+		run_forever
+		;;
+	*)
+		echo "Usage: $0 [run|once|restart <reason>]" >&2
+		exit 2
+		;;
+esac
