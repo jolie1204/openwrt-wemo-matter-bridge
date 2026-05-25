@@ -277,9 +277,16 @@ database environment variables to the process. The app now retries
 and the app reports the descriptor `PartsList` after publishing bridged
 endpoints.
 
+The OpenWrt package also includes `wemo-matter-bridge-watchdog`, a procd health
+service. It checks that `wemo_ctrl` and `wemo-bridge-app` are running, verifies
+that the device/state databases can be read, and restarts the bridge stack only
+after repeated failures such as all known active WeMo devices becoming offline
+or the Matter app UDP receive queue staying high.
+
 Useful checks on a running bridge:
 
 ```sh
+wemo-matter-bridge health
 tr '\0' '\n' </proc/$(pidof wemo-bridge-app)/environ | grep WEMO
 logread | grep -E 'WeMo bind|Added device|WeMo bridge published'
 ```

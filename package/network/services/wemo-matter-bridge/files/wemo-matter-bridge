@@ -234,6 +234,25 @@ status_cmd()
 	if command -v wemo_client >/dev/null 2>&1; then
 		printf 'wemo_client: installed\n'
 	fi
+
+	if [ -x /etc/init.d/wemo-matter-bridge-watchdog ]; then
+		printf 'watchdog: '
+		if pidof wemo-matter-bridge-watchdog >/dev/null 2>&1; then
+			printf 'running\n'
+		else
+			printf 'stopped\n'
+		fi
+	fi
+}
+
+health_cmd()
+{
+	if command -v wemo-matter-bridge-watchdog >/dev/null 2>&1; then
+		wemo-matter-bridge-watchdog once && echo "health: ok"
+	else
+		echo "wemo-matter-bridge-watchdog is not installed" >&2
+		return 1
+	fi
 }
 
 scan_wemo()
@@ -273,6 +292,7 @@ Commands:
   qr                  Print QR payload, manual code, and ASCII QR when qrencode is installed
   reset-onboarding    Regenerate onboarding data; controllers may need recommissioning
   status              Show bridge process and onboarding status
+  health              Run one watchdog health check
   logs                Follow relevant OpenWrt/systemd logs
   scan-wemo           Trigger WeMo discovery and list devices through wemo_client
   restart             Restart wemo_ctrl and wemo-matter-bridge services
@@ -294,6 +314,9 @@ case "$1" in
 	status)
 		status_cmd
 		;;
+	health)
+		health_cmd
+		;;
 	logs)
 		if command -v logread >/dev/null 2>&1; then
 			logread -f -e wemo -e matter -e CHIP
@@ -306,8 +329,10 @@ case "$1" in
 		;;
 	restart)
 		if [ -x /etc/init.d/wemo_ctrl ] && [ -x /etc/init.d/wemo-matter-bridge ]; then
+			[ -x /etc/init.d/wemo-matter-bridge-watchdog ] && /etc/init.d/wemo-matter-bridge-watchdog stop
 			/etc/init.d/wemo_ctrl restart
 			/etc/init.d/wemo-matter-bridge restart
+			[ -x /etc/init.d/wemo-matter-bridge-watchdog ] && /etc/init.d/wemo-matter-bridge-watchdog start
 		else
 			systemctl restart wemo_ctrl wemo-matter-bridge
 		fi
