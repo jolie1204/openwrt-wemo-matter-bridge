@@ -74,7 +74,10 @@ sudo apt install ./openwemo-matter-bridge-vX.Y.Z-arm64.deb
 wemo-matter-bridge qr
 ```
 
-This path is experimental until validated on more Raspberry Pi OS installs.
+This path is experimental until validated on more Raspberry Pi OS installs. It
+also does not yet include the OpenWrt/procd watchdog behavior from the OpenWrt
+firmware and package releases; use the Raspberry Pi OpenWrt firmware for the
+most complete appliance-style release.
 
 ## What Not To Download
 

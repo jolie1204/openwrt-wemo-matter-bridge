@@ -7,6 +7,12 @@ The Debian package is not built from OpenWrt `.apk` artifacts. It must be built
 natively on Raspberry Pi OS 64-bit so the binaries link against Debian/glibc
 libraries.
 
+Current status: experimental. The Raspberry Pi OS `.deb` does not yet include
+the OpenWrt/procd watchdog service added to the OpenWrt firmware and package
+releases. Treat the OpenWrt Raspberry Pi image as the recommended release path
+until the Debian package has equivalent systemd watchdog coverage and more
+Raspberry Pi OS validation.
+
 ## Supported Host
 
 - Raspberry Pi OS 64-bit: experimental
@@ -172,6 +178,9 @@ journalctl -u wemo_ctrl -u wemo-matter-bridge -f
 ## Limitations
 
 - Experimental packaging path; OpenWrt remains the primary release image.
+- The OpenWrt/procd watchdog is not part of the Debian package yet. A future
+  Debian release should add an equivalent systemd timer/service or watchdog
+  unit before it is presented as feature-equivalent to the OpenWrt image.
 - The first Debian release should be labeled experimental until validated on a
   real Raspberry Pi OS 64-bit install.
 - The package does not claim Matter certification.

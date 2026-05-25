@@ -56,6 +56,11 @@ with additional partitions after rootfs.
 The Debian package must be built natively on Raspberry Pi OS 64-bit. It is not
 created from OpenWrt `.apk` files.
 
+The Debian package is experimental and should not be published as
+feature-equivalent to the OpenWrt Raspberry Pi image yet. In particular, the
+OpenWrt/procd watchdog is not included; add equivalent systemd watchdog coverage
+before promoting a Debian release for normal users.
+
 ```sh
 scripts/release/build_debian_package.sh --version v0.1.0 -j "$(nproc)"
 TAG=v0.1.0 scripts/release/package_release_assets.sh

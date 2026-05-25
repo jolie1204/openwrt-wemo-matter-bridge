@@ -160,6 +160,9 @@ Use this release when you want to run the bridge as systemd services on
 Raspberry Pi OS or Debian instead of booting an OpenWrt firmware image.
 
 This path is experimental until validated on more Raspberry Pi OS installs.
+It does not yet include the OpenWrt/procd watchdog behavior from the OpenWrt
+firmware and package releases. Use the Raspberry Pi OpenWrt firmware for the
+most complete appliance-style release.
 
 ## Which File Should I Download?
 
