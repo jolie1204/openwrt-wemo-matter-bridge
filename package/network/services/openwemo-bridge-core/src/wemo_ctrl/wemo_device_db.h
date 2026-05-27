@@ -43,5 +43,6 @@ int wemo_dev_db_update_friendly_name(sqlite3 *db, int wemo_id, const char *frien
 int wemo_dev_db_prune_stale(sqlite3 *dev_db, sqlite3 *state_db, int stale_after_sec);
 int wemo_dev_db_update_capability(sqlite3 *db, int wemo_id, int cap, int value);
 int wemo_dev_db_get_capability(sqlite3 *db, int wemo_id, int cap);
+int wemo_dev_db_update_insight_params(sqlite3 *db, int wemo_id, const char *params);
 int wemo_dev_db_delete_row(sqlite3 *db, int wemo_id);
 #endif /* WEMO_DEVICE_DB_H_ */

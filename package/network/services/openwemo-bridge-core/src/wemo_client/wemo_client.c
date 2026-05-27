@@ -67,6 +67,7 @@ enum cmdloop_cmds {
     GET_INSIGHT_THRESHOLD,
     SET_INSIGHT_HOME,
     GET_INSIGHT_HOME,
+    GET_INSIGHT_PARAMS,
     HEALTH,
     HEALTHDEV,
     HEALTHCTRL,
@@ -112,6 +113,7 @@ static struct cmdloop_commands cmdloop_cmdlist[] = {
     {"getpowerthreshold", GET_INSIGHT_THRESHOLD, 1, "ONLY for Insight"},
     {"sethomesettings", SET_INSIGHT_HOME, 3, "<energyPerUnitCost> <currency> ONLY for Insight"},
     {"gethomesettings", GET_INSIGHT_HOME, 1, "ONLY for Insight"},
+    {"getinsightparams", GET_INSIGHT_PARAMS, 2, "<devnum> ONLY for Insight"},
     {"health", HEALTH, 1, ""},
     {"healthdev", HEALTHDEV, 2, "<devnum>"},
     {"healthctrl", HEALTHCTRL, 1, ""},
@@ -753,6 +755,7 @@ void printhelp()
     printf("\tgetpowerthreshold (ONLY for Insight)\n");
     printf("\tsethomesettings <energyPerUnitCost> <currency> (ONLY for Insight)\n");
     printf("\tgethomesettings (ONLY for Insight)\n");
+    printf("\tgetinsightparams <devnum> (ONLY for Insight)\n");
     printf("\thealth\n");
     printf("\thealthdev <devnum>\n");
     printf("\thealthctrl\n");
@@ -1259,13 +1262,16 @@ void wemo_client_process_command(char *cmdline)
         send_ipc_command("setpowerthreshold", CMD_SET_POWER_THRESHOLD, 1, &threshold, sizeof(struct we_insight_threshold));
         break;
     case GET_INSIGHT_THRESHOLD:
-        send_ipc_command("getpowerthreshold", CMD_GET_DATA_EXPORTINFO, 1, NULL, 0);
+        send_ipc_command("getpowerthreshold", CMD_GET_POWER_THRESHOLD, 1, NULL, 0);
         break;
     case SET_INSIGHT_HOME:
         send_ipc_command("sethomesettings", CMD_SET_INSIGHTHOME_SETTINGS, 1, &settings, sizeof(struct we_insight_home_settings));
         break;
     case GET_INSIGHT_HOME:
-        send_ipc_command("gethomesettings", CMD_GET_INSIGHT_PARAMS, 1, NULL, 0);
+        send_ipc_command("gethomesettings", CMD_GET_INSIGHTHOME_SETTINGS, 1, NULL, 0);
+        break;
+    case GET_INSIGHT_PARAMS:
+        send_ipc_command("getinsightparams", CMD_GET_INSIGHT_PARAMS, arg1, NULL, 0);
         break;
     case HEALTH:
         print_health_snapshot();

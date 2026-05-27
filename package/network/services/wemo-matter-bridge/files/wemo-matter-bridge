@@ -264,6 +264,211 @@ scan_wemo()
 	printf 'discover\nlistdev\nexit\n' | WEMO_CLIENT_QUIET=1 wemo_client
 }
 
+sql_escape()
+{
+	printf '%s' "$1" | sed "s/'/''/g"
+}
+
+sqlite3_busy()
+{
+	sqlite3 -cmd '.timeout 5000' "$@"
+}
+
+insight_ensure_table()
+{
+	local state_db="$1"
+
+	sqlite3_busy "$state_db" "CREATE TABLE IF NOT EXISTS insight_state (
+  wemo_id INTEGER PRIMARY KEY,
+  raw_params TEXT NOT NULL,
+  binary_state INTEGER,
+  last_change INTEGER,
+  on_for_sec INTEGER,
+  on_today_sec INTEGER,
+  on_total_sec INTEGER,
+  timespan_sec INTEGER,
+  average_power_mw INTEGER,
+  current_power_mw INTEGER,
+  energy_today_mwh INTEGER,
+  energy_total_mwh INTEGER,
+  standby_limit_mw INTEGER,
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);"
+}
+
+insight_find_port()
+{
+	local ip="$1"
+	local port
+	local body
+
+	for port in 49154 49153 49152 49155 49156; do
+		body="$(wget -q -T 3 -O - "http://$ip:$port/setup.xml" 2>/dev/null)" || continue
+		printf '%s' "$body" | grep -qi '<serviceType>urn:Belkin:service:insight:1</serviceType>' || continue
+		printf '%s\n' "$port"
+		return 0
+	done
+
+	return 1
+}
+
+insight_fetch_params()
+{
+	local ip="$1"
+	local port="$2"
+	local request="/tmp/wemo-insight-$$.xml"
+	local response
+
+	cat > "$request" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <s:Body>
+    <u:GetInsightParams xmlns:u="urn:Belkin:service:insight:1" />
+  </s:Body>
+</s:Envelope>
+EOF
+
+	response="$(wget -q -T 5 -O - \
+		--header='Content-Type: text/xml; charset="utf-8"' \
+		--header='SOAPACTION: "urn:Belkin:service:insight:1#GetInsightParams"' \
+		--post-file="$request" \
+		"http://$ip:$port/upnp/control/insight1" 2>/dev/null)"
+	rm -f "$request"
+
+	printf '%s\n' "$response" | sed -n 's/.*<InsightParams>\([^<]*\)<\/InsightParams>.*/\1/p' | head -n 1
+}
+
+insight_store_params()
+{
+	local state_db="$1"
+	local id="$2"
+	local params="$3"
+	local raw
+	local binary_state last_change on_for on_today on_total timespan average_power current_power energy_today energy_total standby_limit
+
+	IFS='|' read -r binary_state last_change on_for on_today on_total timespan average_power current_power energy_today energy_total standby_limit <<EOF
+$params
+EOF
+
+	raw="$(sql_escape "$params")"
+	sqlite3_busy "$state_db" "INSERT INTO insight_state (
+  wemo_id, raw_params, binary_state, last_change, on_for_sec, on_today_sec,
+  on_total_sec, timespan_sec, average_power_mw, current_power_mw,
+  energy_today_mwh, energy_total_mwh, standby_limit_mw, updated_at
+) VALUES (
+  $id, '$raw', ${binary_state:-0}, ${last_change:-0}, ${on_for:-0}, ${on_today:-0},
+  ${on_total:-0}, ${timespan:-0}, ${average_power:-0}, ${current_power:-0},
+  ${energy_today:-0}, ${energy_total:-0}, ${standby_limit:-0}, strftime('%s','now')
+) ON CONFLICT(wemo_id) DO UPDATE SET
+  raw_params = excluded.raw_params,
+  binary_state = excluded.binary_state,
+  last_change = excluded.last_change,
+  on_for_sec = excluded.on_for_sec,
+  on_today_sec = excluded.on_today_sec,
+  on_total_sec = excluded.on_total_sec,
+  timespan_sec = excluded.timespan_sec,
+  average_power_mw = excluded.average_power_mw,
+  current_power_mw = excluded.current_power_mw,
+  energy_today_mwh = excluded.energy_today_mwh,
+  energy_total_mwh = excluded.energy_total_mwh,
+  standby_limit_mw = excluded.standby_limit_mw,
+  updated_at = excluded.updated_at;"
+}
+
+insight_refresh_device()
+{
+	local db="$1"
+	local state_db="$2"
+	local id="$3"
+	local ip
+	local port
+	local params
+
+	ip="$(sqlite3_busy "$db" "SELECT ipaddr FROM wemo_device WHERE wemo_id = $id AND retired = 0 AND device_type = 5 LIMIT 1;")"
+	[ -n "$ip" ] || {
+		echo "Insight device not found in DB: $id" >&2
+		return 1
+	}
+
+	port="$(insight_find_port "$ip")" || {
+		echo "Unable to find Insight service for wemo_id=$id ip=$ip" >&2
+		return 1
+	}
+
+	params="$(insight_fetch_params "$ip" "$port")"
+	[ -n "$params" ] || {
+		echo "Unable to fetch InsightParams for wemo_id=$id ip=$ip port=$port" >&2
+		return 1
+	}
+
+	insight_store_params "$state_db" "$id" "$params"
+}
+
+insight()
+{
+	local db="${WEMO_STATE_DIR:-/data/wemo-matter}/wemo_device.db"
+	local state_db="${WEMO_STATE_DIR:-/data/wemo-matter}/wemo_state.db"
+	local id="${1:-}"
+	local ids
+
+	command -v sqlite3 >/dev/null 2>&1 || {
+		echo "sqlite3 is not installed" >&2
+		return 1
+	}
+
+	[ -f "$db" ] || {
+		echo "device DB not found: $db" >&2
+		return 1
+	}
+	[ -f "$state_db" ] || {
+		echo "state DB not found: $state_db" >&2
+		return 1
+	}
+
+	insight_ensure_table "$state_db" || return 1
+
+	if [ -n "$id" ]; then
+		case "$id" in
+			''|*[!0-9]*)
+				echo "wemo_id must be numeric" >&2
+				return 1
+				;;
+		esac
+		ids="$id"
+	else
+		ids="$(sqlite3_busy "$db" "SELECT wemo_id FROM wemo_device WHERE retired = 0 AND device_type = 5 ORDER BY friendly_name;")"
+	fi
+
+	if [ -z "$ids" ]; then
+		echo "No active WeMo Insight devices found."
+		return 0
+	fi
+
+	for id in $ids; do
+		insight_refresh_device "$db" "$state_db" "$id" || true
+	done
+
+	sqlite3_busy -header -column "$state_db" "ATTACH '$db' AS dev;
+SELECT
+  d.wemo_id,
+  d.friendly_name,
+  d.model_name,
+  s.binary_state,
+  ROUND(COALESCE(s.current_power_mw, 0) / 1000.0, 3) AS current_w,
+  ROUND(COALESCE(s.average_power_mw, 0) / 1000.0, 3) AS average_w,
+  s.on_for_sec,
+  s.on_today_sec,
+  ROUND(COALESCE(s.energy_today_mwh, 0) / 60000.0, 3) AS today_wh,
+  ROUND(COALESCE(s.energy_total_mwh, 0) / 60000.0, 3) AS total_14d_wh,
+  datetime(s.updated_at, 'unixepoch', 'localtime') AS updated
+FROM insight_state s
+JOIN dev.wemo_device d ON d.wemo_id = s.wemo_id
+WHERE d.retired = 0
+  AND d.device_type = 5
+  AND ('$1' = '' OR d.wemo_id = CAST('$1' AS INTEGER))
+ORDER BY d.friendly_name;"
+}
+
 reset_onboarding()
 {
 	if [ "$1" != "--force" ] && [ "$1" != "-f" ]; then
@@ -295,6 +500,7 @@ Commands:
   health              Run one watchdog health check
   logs                Follow relevant OpenWrt/systemd logs
   scan-wemo           Trigger WeMo discovery and list devices through wemo_client
+  insight [wemo_id]   Refresh and print WeMo Insight power telemetry
   restart             Restart wemo_ctrl and wemo-matter-bridge services
 EOF
 }
@@ -326,6 +532,9 @@ case "$1" in
 		;;
 	scan-wemo)
 		scan_wemo
+		;;
+	insight)
+		insight "${2:-}"
 		;;
 	restart)
 		if [ -x /etc/init.d/wemo_ctrl ] && [ -x /etc/init.d/wemo-matter-bridge ]; then

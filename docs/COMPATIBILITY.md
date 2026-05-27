@@ -17,9 +17,9 @@ validation before they should be described as supported.
 | Device | Matter Exposure | Status | Notes |
 |---|---|---|---|
 | WeMo Switch | On/Off | Supported/needs more validation | Legacy LAN UPnP control path. |
-| WeMo Mini | On/Off Plug-in Unit | Supported/needs more validation | Presented as a Matter on/off plug when detected as plug. |
+| WeMo Mini / WeMo Plug | On/Off Plug-in Unit | Supported/needs more validation | Presented as a Matter on/off plug when detected as socket/plug, including newer FreeRTOS plug firmware. |
 | WeMo Dimmer | Dimmable Light | Supported/needs more validation | Exposes On/Off and Level Control. |
-| WeMo Insight | Future | Untested | Energy reporting is not currently exposed. |
+| WeMo Insight / Insight V2 | On/Off Plug-in Unit | Experimental | On/off is exposed to Matter as a plug. Insight power telemetry is collected locally and available with `wemo-matter-bridge insight`; Matter electrical measurement exposure is not implemented yet. |
 
 ## Matter Controllers
 

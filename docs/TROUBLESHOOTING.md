@@ -63,6 +63,13 @@ Run discovery:
 wemo-matter-bridge scan-wemo
 ```
 
+For WeMo Insight devices, refresh and print locally cached power telemetry:
+
+```sh
+wemo-matter-bridge insight
+wemo-matter-bridge insight <wemo_id>
+```
+
 Then restart services:
 
 ```sh

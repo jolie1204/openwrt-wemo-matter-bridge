@@ -105,6 +105,7 @@ wemo-matter-bridge qr
 wemo-matter-bridge status
 wemo-matter-bridge logs
 wemo-matter-bridge scan-wemo
+wemo-matter-bridge insight
 wemo-matter-bridge qr
 wemo-matter-bridge restart
 wemo-matter-bridge reset-onboarding

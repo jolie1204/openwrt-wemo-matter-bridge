@@ -46,6 +46,7 @@
 
 #define WEMO_DEVICE_ENTRIES 13
 #define STATE_ENTRIES 4
+#define INSIGHT_PARAM_FIELDS 11
 #define STATE_CACHE_MAX_ENTRIES 512
 #define STATE_CACHE_DEFAULT_FLUSH_MS 2000
 
@@ -76,6 +77,43 @@ static int state_cache_thread_running = 0;
 static int state_cache_thread_stop = 0;
 static int state_cache_flush_ms = STATE_CACHE_DEFAULT_FLUSH_MS;
 static int wemo_dev_db_upsert_capability(sqlite3 *db, int wemo_id, int cap, int value);
+
+static int contains_case(const char *haystack, const char *needle)
+{
+    return haystack != NULL && needle != NULL && strcasestr(haystack, needle) != NULL;
+}
+
+static int wemo_dev_classify_type(const char *UDN, const char *model_name, const char *firmware_dev, int *type)
+{
+    const int looks_socket = contains_case(UDN, "socket") || contains_case(UDN, "plug") ||
+        contains_case(model_name, "socket") || contains_case(model_name, "plug");
+
+    if (type == NULL) {
+        return 0;
+    }
+    if (looks_socket) {
+        *type = (firmware_dev != NULL && !strcasecmp(firmware_dev, "SNS")) ? WEMO_SWITCH : WEMO_MINI;
+        return 1;
+    }
+    if (contains_case(UDN, "lightswitch") || contains_case(model_name, "lightswitch")) {
+        *type = WEMO_LIGHT;
+        return 1;
+    }
+    if (contains_case(UDN, "dimmer") || contains_case(model_name, "dimmer")) {
+        *type = WEMO_DIMMER;
+        return 1;
+    }
+    if (contains_case(UDN, "insight") || contains_case(model_name, "insight")) {
+        *type = WEMO_INSIGHT;
+        return 1;
+    }
+    if (contains_case(UDN, "sensor") || contains_case(model_name, "sensor")) {
+        *type = WEMO_SENSOR;
+        return 1;
+    }
+    *type = WEMO_UNKNOWN;
+    return 0;
+}
 
 static state_cache_entry_t *state_cache_find_locked(int wemo_id)
 {
@@ -369,6 +407,40 @@ static int wemo_dev_db_ensure_state_capability_table(sqlite3 *state_db)
                           &errmsg);
     if (rc != SQLITE_OK) {
         LOG_ERROR_MSG("failed to ensure state_capability table: %s",
+                errmsg ? errmsg : "unknown error");
+        if (errmsg != NULL) {
+            sqlite3_free(errmsg);
+        }
+        return DB_ERROR;
+    }
+    return DB_SUCCESS;
+}
+
+static int wemo_dev_db_ensure_insight_state_table(sqlite3 *state_db)
+{
+    char *errmsg = NULL;
+    int rc = sqlite3_exec(state_db,
+                          "CREATE TABLE IF NOT EXISTS insight_state ("
+                          "wemo_id INTEGER PRIMARY KEY,"
+                          "raw_params TEXT NOT NULL,"
+                          "binary_state INTEGER,"
+                          "last_change INTEGER,"
+                          "on_for_sec INTEGER,"
+                          "on_today_sec INTEGER,"
+                          "on_total_sec INTEGER,"
+                          "timespan_sec INTEGER,"
+                          "average_power_mw INTEGER,"
+                          "current_power_mw INTEGER,"
+                          "energy_today_mwh INTEGER,"
+                          "energy_total_mwh INTEGER,"
+                          "standby_limit_mw INTEGER,"
+                          "updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))"
+                          ");",
+                          NULL,
+                          NULL,
+                          &errmsg);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR_MSG("failed to ensure insight_state table: %s",
                 errmsg ? errmsg : "unknown error");
         if (errmsg != NULL) {
             sqlite3_free(errmsg);
@@ -684,6 +756,9 @@ int wemo_dev_db_init(sqlite3 **dev_db, sqlite3 **state_db)
     if (wemo_dev_db_ensure_state_capability_table(*state_db) != DB_SUCCESS) {
         return DB_ERROR;
     }
+    if (wemo_dev_db_ensure_insight_state_table(*state_db) != DB_SUCCESS) {
+        return DB_ERROR;
+    }
     if (wemo_dev_db_migrate_state_capabilities(*state_db) != DB_SUCCESS) {
         return DB_ERROR;
     }
@@ -702,7 +777,7 @@ void wemo_dev_db_finish(sqlite3 *dev_db, sqlite3 *state_db)
     CloseDB(state_db);
 }
 
-static int wemo_dev_parse_version(char *firmware, char *UDN, char *version, int *type)
+static int wemo_dev_parse_version(char *firmware, char *UDN, char *model_name, char *version, size_t version_len, int *type)
 {
     int major;
     int minor;
@@ -711,58 +786,23 @@ static int wemo_dev_parse_version(char *firmware, char *UDN, char *version, int 
     char firmware_type[10];
     char os[10];
     char dev[10];
-    char *substring = NULL;
 
     if (sscanf(firmware, "WeMo_WW_%d.%d.%d.%[^-]-%[^-]-%[^-]", &major, &minor, &fix, firmware_type, os, dev) != 6) {
-        fprintf(stderr, "error parsing firmware version (%s)..\n", firmware);
-        fprintf(stderr, "Trying to parse old for old firmware..\n");
+        LOG_DEBUG_MSG("firmware version does not match legacy parser, using identity fallback: %s",
+                firmware ? firmware : "(null)");
 
         if (sscanf(firmware, "WeMo_US_%d.%d.%d.%[^-]", &major, &minor, &fix, firmware_type) != 4) {
-        return 0;
-    }
+            snprintf(version, version_len, "%.63s", (firmware != NULL && firmware[0] != '\0') ? firmware : "unknown");
+            return wemo_dev_classify_type(UDN, model_name, NULL, type);
+        }
         else {
-            if ((substring = strcasestr(UDN, "socket"))) {
-                *type = WEMO_SWITCH;
-            }
-            else if ((substring = strcasestr(UDN, "lightswitch"))) {
-                *type = WEMO_LIGHT;
-            }
-            else {
-                *type = WEMO_UNKNOWN;
-            }
-
-            sprintf(version, "%d,%d,%d", major, minor, fix);
-            return 1;
+            snprintf(version, version_len, "%d,%d,%d", major, minor, fix);
+            return wemo_dev_classify_type(UDN, model_name, NULL, type);
         }
     }
 
-    sprintf(version, "%d.%d.%d", major, minor, fix);
-
-    if ((substring = strcasestr(UDN, "uuid:socket"))) {
-    if (!strcasecmp(dev, "SNS")) {
-        *type = WEMO_SWITCH;
-    }
-        else {
-        *type = WEMO_MINI;
-    }
-    }
-    else if ((substring = strcasestr(UDN, "uuid:lightswitch"))) {
-        *type = WEMO_LIGHT;
-    }
-    else if ((substring = strcasestr(UDN, "uuid:dimmer"))) {
-        *type = WEMO_DIMMER;
-    }
-    else if ((substring = strcasestr(UDN, "uuid:insight"))) {
-        *type = WEMO_INSIGHT;
-    }
-    else if ((substring = strcasestr(UDN, "uuid:sensor"))) {
-            *type = WEMO_SENSOR;
-    }
-    else {
-        *type = WEMO_UNKNOWN;
-        return 0;
-    }
-    return 1;
+    snprintf(version, version_len, "%d.%d.%d", major, minor, fix);
+    return wemo_dev_classify_type(UDN, model_name, dev, type);
 }
 
 void wemo_dev_db_insert(sqlite3 *db, struct wemoDevice *dev)
@@ -784,12 +824,12 @@ void wemo_dev_db_insert(sqlite3 *db, struct wemoDevice *dev)
         "retired = 0, "
         "retired_at = 0;";
     int type = 0;
-    char version[12];
+    char version[64];
     int rc;
 
-    memset(version, 0, 12);
+    memset(version, 0, sizeof(version));
 
-    if (wemo_dev_parse_version(dev->firmwareVersion, dev->UDN, version, &type)) {
+    if (wemo_dev_parse_version(dev->firmwareVersion, dev->UDN, dev->modelName, version, sizeof(version), &type)) {
         rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
         if (rc != SQLITE_OK) {
             LOG_ERROR_MSG("failed preparing device upsert: %s", sqlite3_errmsg(db));
@@ -1036,6 +1076,81 @@ int wemo_dev_db_update_capability(sqlite3 *db, int wemo_id, int cap, int value)
     return 1;
 }
 
+int wemo_dev_db_update_insight_params(sqlite3 *db, int wemo_id, const char *params)
+{
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "INSERT INTO insight_state ("
+        "wemo_id, raw_params, binary_state, last_change, on_for_sec, on_today_sec, "
+        "on_total_sec, timespan_sec, average_power_mw, current_power_mw, "
+        "energy_today_mwh, energy_total_mwh, standby_limit_mw, updated_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now')) "
+        "ON CONFLICT(wemo_id) DO UPDATE SET "
+        "raw_params = excluded.raw_params, "
+        "binary_state = excluded.binary_state, "
+        "last_change = excluded.last_change, "
+        "on_for_sec = excluded.on_for_sec, "
+        "on_today_sec = excluded.on_today_sec, "
+        "on_total_sec = excluded.on_total_sec, "
+        "timespan_sec = excluded.timespan_sec, "
+        "average_power_mw = excluded.average_power_mw, "
+        "current_power_mw = excluded.current_power_mw, "
+        "energy_today_mwh = excluded.energy_today_mwh, "
+        "energy_total_mwh = excluded.energy_total_mwh, "
+        "standby_limit_mw = excluded.standby_limit_mw, "
+        "updated_at = excluded.updated_at";
+    char copy[1280];
+    char *saveptr = NULL;
+    char *token = NULL;
+    long long fields[INSIGHT_PARAM_FIELDS];
+    int valid[INSIGHT_PARAM_FIELDS];
+    int field_count = 0;
+    int rc;
+
+    if (db == NULL || wemo_id <= 0 || params == NULL || params[0] == '\0') {
+        return 0;
+    }
+
+    memset(fields, 0, sizeof(fields));
+    memset(valid, 0, sizeof(valid));
+    snprintf(copy, sizeof(copy), "%s", params);
+    token = strtok_r(copy, "|", &saveptr);
+    while (token != NULL && field_count < INSIGHT_PARAM_FIELDS) {
+        char *end = NULL;
+        errno = 0;
+        fields[field_count] = strtoll(token, &end, 10);
+        if (errno == 0 && end != token) {
+            valid[field_count] = 1;
+        }
+        field_count++;
+        token = strtok_r(NULL, "|", &saveptr);
+    }
+
+    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        LOG_ERROR_MSG("prepare failed for insight_state upsert: %s", sqlite3_errmsg(db));
+        return 0;
+    }
+
+    sqlite3_bind_int(stmt, 1, wemo_id);
+    sqlite3_bind_text(stmt, 2, params, -1, SQLITE_TRANSIENT);
+    for (int i = 0; i < INSIGHT_PARAM_FIELDS; i++) {
+        if (valid[i]) {
+            sqlite3_bind_int64(stmt, i + 3, fields[i]);
+        } else {
+            sqlite3_bind_null(stmt, i + 3);
+        }
+    }
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        LOG_ERROR_MSG("step failed for insight_state upsert: %s", sqlite3_errmsg(db));
+        return 0;
+    }
+    return 1;
+}
+
 int wemo_dev_db_get_capability(sqlite3 *db, int wemo_id, int cap)
 {
     char legacy_cap[512];
@@ -1109,14 +1224,16 @@ int wemo_dev_statedb_delete_row(sqlite3 *db, int wemo_id)
     char condition[512];
     int ret_state;
     int ret_cap;
+    int ret_insight;
 
     sprintf(condition, "wemo_id=%d", wemo_id);
+    ret_insight = WeMoDBDeleteEntry(&db, "insight_state", condition);
     ret_cap = WeMoDBDeleteEntry(&db, "state_capability", condition);
     ret_state = WeMoDBDeleteEntry(&db, "state", condition);
 
-    if (ret_state || ret_cap) {
-        LOG_ERROR_MSG("failed to delete state rows for wemo_id=%d (state=%d, cap=%d)",
-                wemo_id, ret_state, ret_cap);
+    if (ret_state || ret_cap || ret_insight) {
+        LOG_ERROR_MSG("failed to delete state rows for wemo_id=%d (state=%d, cap=%d, insight=%d)",
+                wemo_id, ret_state, ret_cap, ret_insight);
         return 0;
     }
     pthread_mutex_lock(&state_cache_lock);

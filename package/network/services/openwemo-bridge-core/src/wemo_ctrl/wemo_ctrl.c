@@ -1441,6 +1441,7 @@ void wemoCtrlPointHandleActionResponse(struct wemoDeviceNode *devnode, int servi
 
         wemo_copy_str(name_value.name, sizeof(name_value.name), "InsightParams", "name_value.name");
         wemo_copy_str(name_value.value, sizeof(name_value.value), insight_params, "name_value.value");
+        wemo_dev_db_update_insight_params(ctrlpt_state_db, wemo_id, insight_params);
         LOG_DEBUG_MSG("call wemo_ipc_send_name_value: name: %s, value: %s",
                 name_value.name, name_value.value);
         wemo_ipc_send_name_value(wemo_id, &name_value);
@@ -1871,6 +1872,7 @@ wemoStateUpdate( char *UDN,
                                 struct we_name_value name_value;
                                 wemo_copy_str(name_value.name, sizeof(name_value.name), "InsightParams", "name_value.name");
                                 wemo_copy_str(name_value.value, sizeof(name_value.value), tmpstate, "name_value.value");
+                                wemo_dev_db_update_insight_params(ctrlpt_state_db, wemo_id, tmpstate);
                                 LOG_DEBUG_MSG("call wemo_ipc_send_name_value: name: %s, value: %s",
                                         name_value.name, name_value.value);
                                 wemo_ipc_send_name_value(wemo_id, &name_value);
