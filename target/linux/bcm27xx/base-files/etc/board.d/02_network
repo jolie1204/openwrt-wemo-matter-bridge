@@ -23,12 +23,12 @@ raspberrypi,5-model-b |\
 raspberrypi,model-b |\
 raspberrypi,model-b-plus |\
 raspberrypi,model-b-rev2)
-	ucidef_set_interface_lan "eth0"
+	ucidef_set_interface_lan "eth0" "dhcp"
 	;;
 
 raspberrypi,model-zero-2 |\
 raspberrypi,model-zero-w)
-	ucidef_set_interface_lan "wlan0"
+	ucidef_set_interface_lan "wlan0" "dhcp"
 	;;
 esac
 

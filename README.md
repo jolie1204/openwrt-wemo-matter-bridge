@@ -412,7 +412,8 @@ Typical output files include:
 
 Pi runtime notes:
 
-- OpenWrt on Raspberry Pi uses `eth0` as `lan` by default.
+- OpenWrt on Raspberry Pi uses `eth0` as `lan` by default, and the Wemo
+  appliance profiles configure that interface as a DHCP client on first boot.
 - The `wemo-rootfs-resize` first-boot service grows an ext4 root partition to
   fill the backing SD card or eMMC device. It detects the booted root partition
   from `/dev/*`, `PARTUUID=`, `UUID=`, or `LABEL=` root arguments and skips
@@ -424,15 +425,6 @@ Pi runtime notes:
 - Bridge state still lives under `/data/wemo-matter`. On Raspberry Pi, that
   path is backed by the normal writable filesystem unless you mount a separate
   disk or partition at `/data`.
-
-If you want the Pi to behave like the MT7628 appliance on a normal upstream
-network, change `lan` to DHCP client after first boot:
-
-```sh
-uci set network.lan.proto='dhcp'
-uci commit network
-service network restart
-```
 
 ## Raspberry Pi operator checks
 
