@@ -36,6 +36,21 @@ Then scan the QR code in Apple Home or Google Home.
 Release images generate unique Matter onboarding credentials on first boot.
 They do not ship with one shared setup passcode.
 
+## Companion Android App
+
+If you need a phone app for local Wemo device setup, local device control, or
+Wemo rules management before or alongside the Matter bridge, install Wemo
+Controller for Android from Google Play:
+
+```text
+https://play.google.com/store/apps/details?id=com.meonmesh.lot.wemocontroller
+```
+
+Wemo Controller is a separate local-network Android app. It is useful for
+getting compatible legacy Wemo devices onto the LAN and managing local Wemo
+behavior; the Matter bridge still handles exposing those devices to Apple Home,
+Google Home, or another Matter controller.
+
 ## Scope
 
 This fork adds Wemo bridge specific behavior on top of upstream OpenWrt:

@@ -64,6 +64,20 @@ wemo-matter-bridge qr
 The QR code pairs the bridge itself. Individual WeMo switches, plugs, and
 dimmers appear as bridged endpoints after commissioning.
 
+## Optional Android Wemo Controller
+
+For local Wemo setup, local control, and Wemo rules management, you can install
+Wemo Controller for Android from Google Play:
+
+```text
+https://play.google.com/store/apps/details?id=com.meonmesh.lot.wemocontroller
+```
+
+Use it when you need to get compatible legacy Wemo devices onto your LAN or
+manage their local Wemo behavior. Use the Matter QR code above when you are
+ready to add the bridge to Apple Home, Google Home, or another Matter
+controller.
+
 ## Install on Existing OpenWrt
 
 Copy the package artifact to the target:

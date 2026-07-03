@@ -92,6 +92,14 @@ uci commit wemo-matter-bridge
 If device types or names changed after an upgrade, remove the bridge from the
 controller app and commission it again.
 
+For local Wemo setup, direct local control checks, or Wemo rules management,
+the separate Wemo Controller Android app can help verify that the Wemo device
+itself is reachable on the LAN:
+
+```text
+https://play.google.com/store/apps/details?id=com.meonmesh.lot.wemocontroller
+```
+
 ## Existing OpenWrt Install Package Issues
 
 Check which package format your OpenWrt build uses:
