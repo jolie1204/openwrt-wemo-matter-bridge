@@ -54,8 +54,9 @@
 
 #include <app/clusters/identify-server/IdentifyCluster.h>
 #include <app/clusters/identify-server/identify-server.h>
-#include <data-model-providers/codegen/CodegenDataModelProvider.h>
 #include <app/DefaultTimerDelegate.h>
+#include <app/server-cluster/ServerClusterInterfaceRegistry.h>
+#include <data-model-providers/codegen/CodegenDataModelProvider.h>
 
 #include <algorithm>
 #include <array>
@@ -203,6 +204,7 @@ int PrintOnboardingPayload(int argc, char * argv[])
 
 // Device Version for dynamic endpoints:
 #define DEVICE_VERSION_DEFAULT 1
+#define DEVICE_VERSION_ON_OFF_PLUG_IN_UNIT 4
 
 // ---------------------------------------------------------------------------
 //
@@ -215,6 +217,19 @@ int PrintOnboardingPayload(int argc, char * argv[])
 DECLARE_DYNAMIC_ATTRIBUTE_LIST_BEGIN(onOffAttrs)
 DECLARE_DYNAMIC_ATTRIBUTE(OnOff::Attributes::OnOff::Id, BOOLEAN, 1, 0), /* on/off */
     DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
+
+// Identify metadata for bridged plug endpoints. Attribute values and commands
+// are served by a registered IdentifyCluster instance for each endpoint.
+DECLARE_DYNAMIC_ATTRIBUTE_LIST_BEGIN(identifyAttrs)
+DECLARE_DYNAMIC_ATTRIBUTE(Clusters::Identify::Attributes::IdentifyTime::Id, INT16U, 2, ZAP_ATTRIBUTE_MASK(WRITABLE)),
+    DECLARE_DYNAMIC_ATTRIBUTE(Clusters::Identify::Attributes::IdentifyType::Id, ENUM8, 1, 0),
+    DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
+
+constexpr CommandId identifyIncomingCommands[] = {
+    Clusters::Identify::Commands::Identify::Id,
+    Clusters::Identify::Commands::TriggerEffect::Id,
+    kInvalidCommandId,
+};
 
 // Declare Descriptor cluster attributes
 DECLARE_DYNAMIC_ATTRIBUTE_LIST_BEGIN(descriptorAttrs)
@@ -245,7 +260,7 @@ DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::VendorName:
     DECLARE_DYNAMIC_ATTRIBUTE(BridgedDeviceBasicInformation::Attributes::FeatureMap::Id, BITMAP32, 4, 0), /* feature map */
     DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
 
-// Declare Cluster List for Bridged Light endpoint
+// Declare Cluster Lists for Bridged Light and Plug endpoints
 // TODO: It's not clear whether it would be better to get the command lists from
 // the ZAP config on our last fixed endpoint instead.
 constexpr CommandId onOffIncomingCommands[] = {
@@ -264,9 +279,16 @@ DECLARE_DYNAMIC_CLUSTER(OnOff::Id, onOffAttrs, ZAP_CLUSTER_MASK(SERVER), onOffIn
     DECLARE_DYNAMIC_CLUSTER(BridgedDeviceBasicInformation::Id, bridgedDeviceBasicAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr,
                             nullptr) DECLARE_DYNAMIC_CLUSTER_LIST_END;
 
+DECLARE_DYNAMIC_CLUSTER_LIST_BEGIN(bridgedOnOffPlugClusters)
+DECLARE_DYNAMIC_CLUSTER(Clusters::Identify::Id, identifyAttrs, ZAP_CLUSTER_MASK(SERVER), identifyIncomingCommands, nullptr),
+    DECLARE_DYNAMIC_CLUSTER(OnOff::Id, onOffAttrs, ZAP_CLUSTER_MASK(SERVER), onOffIncomingCommands, nullptr),
+    DECLARE_DYNAMIC_CLUSTER(Descriptor::Id, descriptorAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr, nullptr),
+    DECLARE_DYNAMIC_CLUSTER(BridgedDeviceBasicInformation::Id, bridgedDeviceBasicAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr,
+                            nullptr) DECLARE_DYNAMIC_CLUSTER_LIST_END;
+
 // Declare Bridged Light endpoint
 DECLARE_DYNAMIC_ENDPOINT(bridgedLightEndpoint, bridgedLightClusters);
-DECLARE_DYNAMIC_ENDPOINT(bridgedOnOffPlugEndpoint, bridgedLightClusters);
+DECLARE_DYNAMIC_ENDPOINT(bridgedOnOffPlugEndpoint, bridgedOnOffPlugClusters);
 DataVersion gLight1DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
 DataVersion gLight2DataVersions[MATTER_ARRAY_SIZE(bridgedLightClusters)];
 
@@ -336,8 +358,10 @@ wemo_bridge::WemoAdapterOpenWemo gWemoAdapter("127.0.0.1:49153");
 std::atomic_bool gWemoStatePollStarted { false };
 std::atomic_bool gWemoDeviceSyncStarted { false };
 
-// Max cluster count across both endpoint types for DataVersion storage.
-constexpr size_t kMaxBridgedClusters = MATTER_ARRAY_SIZE(bridgedDimmableLightClusters);
+// Max cluster count across all published WeMo endpoint types for DataVersion storage.
+constexpr size_t kMaxBridgedClusters =
+    std::max(MATTER_ARRAY_SIZE(bridgedLightClusters),
+             std::max(MATTER_ARRAY_SIZE(bridgedDimmableLightClusters), MATTER_ARRAY_SIZE(bridgedOnOffPlugClusters)));
 constexpr int kDefaultWemoStatePollIntervalSec = 15;
 constexpr int kMinWemoStatePollIntervalSec = 5;
 constexpr int kDefaultWemoDeviceSyncIntervalSec = 30;
@@ -347,11 +371,14 @@ constexpr int kWemoInitialDiscoveryRetrySec = 2;
 
 struct BridgedWemoLight
 {
+    using RegisteredIdentifyCluster = RegisteredServerCluster<Clusters::IdentifyCluster>;
+
     int wemo_id = 0;
     std::string udn;
     bool is_dimmable = false;
     bool is_plug = false;
     std::unique_ptr<Device> device;  // DeviceOnOff or DeviceDimmable
+    std::unique_ptr<RegisteredIdentifyCluster> identifyCluster;
     std::array<DataVersion, kMaxBridgedClusters> dataVersions {};
 
     // --- Command-echo suppression ---
@@ -465,7 +492,17 @@ DataVersion gComposedTempSensor2DataVersions[MATTER_ARRAY_SIZE(bridgedTempSensor
 // Identify cluster on the aggregator endpoint (endpoint 1).  The ZAP config
 // declares Identify with EXTERNAL_STORAGE attributes, so we need an actual
 // IdentifyCluster instance registered with the codegen data model provider.
+class BridgedIdentifyDelegate final : public Clusters::IdentifyDelegate
+{
+public:
+    void OnIdentifyStart(Clusters::IdentifyCluster &) override {}
+    void OnIdentifyStop(Clusters::IdentifyCluster &) override {}
+    void OnTriggerEffect(Clusters::IdentifyCluster &) override {}
+    bool IsTriggerEffectEnabled() const override { return true; }
+};
+
 DefaultTimerDelegate sIdentifyTimerDelegate;
+BridgedIdentifyDelegate sBridgedIdentifyDelegate;
 RegisteredServerCluster<Clusters::IdentifyCluster>
     gIdentifyClusterEp1(Clusters::IdentifyCluster::Config(1, sIdentifyTimerDelegate)
                             .WithIdentifyType(Clusters::Identify::IdentifyTypeEnum::kNone));
@@ -1367,7 +1404,8 @@ void runOnOffRoomAction(Room * room, bool actionOn, EndpointId endpointId, uint1
 const EmberAfDeviceType gBridgedOnOffDeviceTypes[] = { { DEVICE_TYPE_LO_ON_OFF_LIGHT, DEVICE_VERSION_DEFAULT },
                                                        { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT } };
 
-const EmberAfDeviceType gBridgedOnOffPlugDeviceTypes[] = { { DEVICE_TYPE_ON_OFF_PLUG_IN_UNIT, DEVICE_VERSION_DEFAULT },
+const EmberAfDeviceType gBridgedOnOffPlugDeviceTypes[] = { { DEVICE_TYPE_ON_OFF_PLUG_IN_UNIT,
+                                                             DEVICE_VERSION_ON_OFF_PLUG_IN_UNIT },
                                                            { DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT } };
 
 const EmberAfDeviceType gBridgedDimmableDeviceTypes[] = { { DEVICE_TYPE_LO_DIMMABLE_LIGHT, DEVICE_VERSION_DEFAULT },
@@ -1790,6 +1828,7 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
     }
 
     const size_t clusterCount = slot->is_dimmable ? MATTER_ARRAY_SIZE(bridgedDimmableLightClusters) :
+                                slot->is_plug     ? MATTER_ARRAY_SIZE(bridgedOnOffPlugClusters) :
                                                     MATTER_ARRAY_SIZE(bridgedLightClusters);
 
 #if !CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
@@ -1818,6 +1857,29 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
         return false;
     }
 
+    if (slot->is_plug)
+    {
+        auto identifyCluster = std::make_unique<BridgedWemoLight::RegisteredIdentifyCluster>(
+            Clusters::IdentifyCluster::Config(slot->device->GetEndpointId(), sIdentifyTimerDelegate)
+                .WithIdentifyType(Clusters::Identify::IdentifyTypeEnum::kNone)
+                .WithDelegate(&sBridgedIdentifyDelegate));
+        CHIP_ERROR err =
+            CodegenDataModelProvider::Instance().Registry().Register(identifyCluster->Registration());
+        if (err != CHIP_NO_ERROR)
+        {
+            ChipLogError(DeviceLayer, "Failed to register Identify for WeMo plug %s: %" CHIP_ERROR_FORMAT, name.c_str(),
+                         err.Format());
+            RemoveDeviceEndpoint(slot->device.get());
+            slot->device.reset();
+            slot->wemo_id = 0;
+            slot->udn.clear();
+            return false;
+        }
+        slot->identifyCluster = std::move(identifyCluster);
+        ChipLogProgress(DeviceLayer, "Registered Identify for WeMo plug %s on endpoint %u", name.c_str(),
+                        slot->device->GetEndpointId());
+    }
+
     if (slot->is_dimmable)
     {
         gLevelControlSettings[slot->device.get()] = LevelControlSettings {};
@@ -1836,6 +1898,27 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
     return true;
 }
 
+bool UnregisterWemoIdentifyCluster(BridgedWemoLight & entry)
+{
+    if (!entry.identifyCluster)
+    {
+        return true;
+    }
+
+    sIdentifyTimerDelegate.CancelTimer(&entry.identifyCluster->Cluster());
+    CHIP_ERROR err =
+        CodegenDataModelProvider::Instance().Registry().Unregister(&entry.identifyCluster->Cluster());
+    if (err != CHIP_NO_ERROR && err != CHIP_ERROR_NOT_FOUND)
+    {
+        const char * name = entry.device ? entry.device->GetName() : entry.udn.c_str();
+        ChipLogError(DeviceLayer, "Failed to unregister Identify for WeMo plug %s: %" CHIP_ERROR_FORMAT, name, err.Format());
+        return false;
+    }
+
+    entry.identifyCluster.reset();
+    return true;
+}
+
 void RemovePublishedWemoDevice(BridgedWemoLight & entry)
 {
     if (!entry.device)
@@ -1844,6 +1927,10 @@ void RemovePublishedWemoDevice(BridgedWemoLight & entry)
     }
 
     ChipLogProgress(DeviceLayer, "Removing stale WeMo endpoint: %s <- %s", entry.device->GetName(), entry.udn.c_str());
+    if (!UnregisterWemoIdentifyCluster(entry))
+    {
+        return;
+    }
     gWemoDeviceToUdn.erase(entry.device.get());
     gLevelControlSettings.erase(entry.device.get());
     {
@@ -2109,7 +2196,20 @@ void ApplicationInit()
     VerifyOrDie(CodegenDataModelProvider::Instance().Registry().Register(gIdentifyClusterEp1.Registration()) == CHIP_NO_ERROR);
 }
 
-void ApplicationShutdown() {}
+void ApplicationShutdown()
+{
+    for (auto & entry : gBridgedWemoLights)
+    {
+        (void) UnregisterWemoIdentifyCluster(entry);
+    }
+
+    sIdentifyTimerDelegate.CancelTimer(&gIdentifyClusterEp1.Cluster());
+    CHIP_ERROR err = CodegenDataModelProvider::Instance().Registry().Unregister(&gIdentifyClusterEp1.Cluster());
+    if (err != CHIP_NO_ERROR && err != CHIP_ERROR_NOT_FOUND)
+    {
+        ChipLogError(DeviceLayer, "Failed to unregister aggregator Identify: %" CHIP_ERROR_FORMAT, err.Format());
+    }
+}
 
 int main(int argc, char * argv[])
 {
