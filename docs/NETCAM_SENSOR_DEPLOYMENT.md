@@ -40,6 +40,31 @@ paired target clean build, copied-source 비교 및 실제 musl loader 검증은
 복사·해시 대조했지만, 실제 설치된 바이너리와의 동일성은 배포 전에
 추가로 확인해야 합니다. 같은 버전 이름만으로 동일하다고 판단하지 않습니다.
 
+### 운영 재확인 및 펌웨어 경로 선택
+
+2026-10-09 후속 작업에서 strict SSH로 현재 운영 r21/r22와 overlay 여유
+748 KiB를 다시 확인했습니다. host suite 5개도 현재 main에서 재실행해
+통과했습니다. 두 롤백 APK를 host에서 추출하고, `wemo_ctrl`, `wemo_client`,
+`libwemoengine.so`, `wemo-bridge-app`의 SHA-256을 실제 운영 파일과
+대조해 **4개 모두 일치**했습니다. SDK staging 파일은 strip 이전이므로
+롤백 APK payload를 비교 대상으로 사용해야 합니다. package 단위 rollback
+실행 자체는 여전히 미시험입니다.
+
+사용자가 새 브리지 펌웨어 이미지 준비와 로컬 운영 장치 설치를 승인했습니다.
+새 controller/Matter를 squashfs에 포함하는 16M 이미지로 설치 공간 문제를
+해결하는 경로를 준비합니다. 빌드 seed는
+`configs/wemo-matter-bridge-16m.config`, feed revision은
+`configs/wemo-matter-bridge.feeds.conf`에 저장합니다. `make defconfig`에서
+16M 단일 target, 별도 initramfs, 센서 패키지, WireGuard 및 Wi-Fi 제외를
+확인했습니다. 전체 이미지 빌드/flash/Google Home 수락은 아직 수행 전입니다.
+
+기본 sysupgrade keep 목록이 `/data/wemo-matter/`까지 포함하므로,
+별도 data 파티션을 유지하는 이번 경로에서는 복원 archive에서 `/data`를
+제외해야 합니다. `/etc`의 필수 설정 및 키는 별도로 보존하고, Matter 상태와
+DB의 일관성 있는 비공개 복구 백업은 host에 보관합니다. 기본 백업으로
+data 내용을 overlay에 중복 복원하지 않습니다. 정확한 파티션/이미지 검증과
+복구 경로 확인 후 설치합니다.
+
 ```sh
 cd private/netcam-deployment-2026-10-09
 sha256sum -c SHA256SUMS
