@@ -24,7 +24,8 @@ strict SSH alias `wemo-matter-bridge`에서 읽은 board는
 
 `rootfs_data`는 rootfs 안에서 현재 이미지로부터 생성되는 동적 분할이며
 새 이미지에서 크기가 달라집니다. `/data`는 `/dev/mtdblock6`의 별도 JFFS2입니다.
-새 DTS도 위 고정 분할을 유지해야 합니다. 실행 장치의
+새 DTS도 위 이름·offset·size를 유지해야 합니다. 위 MTD 번호는 당시 관측값이며
+첫 부팅과 복구에서 `/proc/mtd`의 이름으로 번호를 다시 찾습니다. 실행 장치의
 `/lib/upgrade/platform.sh`는 `PART_NAME=firmware`와 default upgrade 경로를
 사용합니다. `/lib/upgrade/common.sh`의 `default_do_upgrade`는 해당 이름의
 MTD에만 image를 씁니다. bootloader/env/factory/data/config 쓰기는 필요하지 않습니다.
@@ -55,6 +56,10 @@ config archive는 다음 절차로 만듭니다.
    archive에 private 값을 출력하지 않습니다.
 2. host에서 archive member 이름을 정규화해 `data`와 `data/` 하위 항목만
    제외합니다. 절대 경로, `..`, data로 향하는 위험한 link가 없는지 검사합니다.
+   tar member를 stream으로 복사해 원본 numeric uid/gid와 mode를 유지합니다.
+   일반 host 사용자로 extract/repack해 root-owned SSH key를 사용자 소유로
+   바꾸지 않습니다. 추가 파일도 target capture의 원래 owner/mode를 사용하고,
+   BusyBox 호환 tar format과 full gzip/tar 읽기를 확인합니다.
 3. 기존 `/etc/config`(network/firewall/WireGuard 포함), Dropbear host keys와
    authorized keys, 계정 파일, `/etc/wemo_ctrl.conf`,
    `/etc/wemo-matter-bridge/matter-onboarding.json`을 보존합니다. 기본 archive에
@@ -112,6 +117,8 @@ service 시작 성공만으로 실제 data mount를 보증할 수 없습니다.
 - `etc-private.tar.gz`: 설정, host keys, onboarding, init/enable 상태의 복구 자료.
 - `data-live-provisional.tar.gz`: 실행 중 data 전체 tar, 229 members.
   **실행 중 여러 파일 간 일관성을 보증하지 않는 임시 백업**입니다.
+  설치/rollback에서 이 오래된 fabric snapshot을 자동 복원하지 않습니다.
+  data 복구가 필요하면 final stopped-state 백업을 사용합니다.
 - `sqlite-wemo_device.db`, `sqlite-wemo_state.db`, `sqlite-wemo.db`:
   target SQLite `.backup` API로 생성하고 `PRAGMA quick_check`의 `ok`를 확인했습니다.
   크기는 각각 16384, 24576, 4096 bytes입니다. target `/tmp` 임시 복사본은
@@ -128,11 +135,22 @@ service 시작 성공만으로 실제 data mount를 보증할 수 없습니다.
    DB/allocator로 대체 기준을 사용할 경우 실제 운영 mapping과의 근거를 기록합니다.
 3. watchdog → Matter app → controller 순으로 stop하고 종료를 확인합니다.
    전원이 연결된 Mini 008은 조작하지 않습니다.
+   먼저 실행 app의 실제 KVS 경로와 config/counter/factory 파일 위치를
+   private 기록에서 확인합니다. 현재 source는 `--KVS /data/wemo-matter/chip/chip_kvs`,
+   compile-time state dir도 같은 경로이며 `/tmp/chip_*.ini`는 data 파일로
+   symlink합니다. 실제 process/build도 이 설정과 같은지 확인해야 합니다.
+   procd/cron/hotplug에 의한 writer 재시작 가능성이 없어야 하고, image 검사
+   실패로 flash가 시작되지 않으면 기존 서비스 순서로 재개할 수 있어야 합니다.
 4. 모든 data writer가 정지했음을 확인한 뒤 final data tar를 host에 전송합니다.
    SQLite WAL/SHM 존재를 확인하고 `.backup` API와 quick_check를 다시 수행합니다.
    기존 sensor DB가 존재하면 함께 보관합니다. CHIP/fabric/onboarding 경로의
    파일 목록·hash와 config/enable 상태를 private manifest에 기록합니다.
    파일 내용을 로그에 출력하지 않습니다.
+   SQLite를 열면서 WAL checkpoint 또는 sidecar 삭제가 발생할 수 있으므로
+   file-level snapshot을 먼저 보관하고, SQLite backup/check 완료 후 baseline
+   hash를 다시 기록합니다. pre-start 비교는 그 최종 baseline을 사용합니다.
+   curated config archive도 final 시점에서 다시 만들어 preflight 이후 변경된
+   UCI/enable 상태를 잃지 않도록 합니다.
 5. raw data flash backup이 필요하면 stopped-state snapshot으로 보관합니다.
    mounted JFFS2를 읽은 live raw dump를 일관성 있는 복구 snapshot으로
    간주하지 않습니다. unmount가 필요한 경우 별도 정지 순서를 확인합니다.
@@ -158,18 +176,24 @@ flash 전 담당 세션은 bridge에 연결된 UART를 특정하고 bootloader p
 dual-slot fallback을 복구 수단으로 선언하지 않습니다. 새 DTS는 vendor
 dual-slot layout과 다르므로 임의 bootB fallback은 금지합니다.
 
-보관한 raw `mtd8-firmware.bin`은 정상 실행 상태 firmware/overlay의 정확한
-백업입니다. **표준 metadata가 있는 sysupgrade 이미지라고 간주하지 않습니다.**
+보관한 raw `mtd8-firmware.bin`은 전송 size/SHA 일치를 확인한 dump입니다.
+immutable kernel/squashfs는 보존됐으나 mounted JFFS2 overlay의 파일 간
+일관성은 보증하지 않습니다. 일관된 raw restore point가 필요하면 stopped-state
+덤프를 추가합니다. **표준 metadata가 있는 sysupgrade 이미지라고 간주하지 않습니다.**
 이를 `sysupgrade -F`로 강제 설치하지 않습니다. bootloader/SPI 복구 시에는
 확인된 명령과 geometry로 `0x050000..0xa1ffff` 범위만 복원하는 방법을
 검증해야 합니다. bootloader/env/factory/data/config 영역은 보존합니다.
 SSH가 살아 있는 rollback에는 검증한 이전 버전의 matching sysupgrade 이미지와
-curated config archive를 우선 준비합니다. fabric 재commissioning, factory reset,
+curated config archive를 우선 준비합니다. 이전/새 image의 board metadata와
+compat version을 대조해 새 sysupgrade에서도 force 없이 이전 image를
+수락하는지 확인합니다. rollback config는 설치 전 final curated archive를
+사용하고, 새 image가 변경한 설정과 data를 다시 기본 백업하지 않습니다.
+fabric 재commissioning, factory reset,
 CHIP 파일 삭제로 복구하지 않습니다.
 
 ## 첫 부팅과 수락
 
-첫 부팅 후 실제 `/dev/mtdblock6` data mount, protected partition hashes,
+첫 부팅 후 이름으로 찾은 data MTD의 실제 JFFS2 mount, protected partition hashes,
 onboarding/fabric 초기화가 없었음, 기존 network/SSH identity, installed paired
 core/Matter versions와 IPCv3를 확인합니다. overlay free 공간과 OOM/restart도
 확인합니다. 최초 SSH 연결에서는 세 daemon이 실제로 정지돼 있고 자동 시작
@@ -192,3 +216,11 @@ Google Home에서 실제 센서 수락 전에는 end-to-end 완료를 주장하�
 완료된 config/이미지/설치 검증 milestone마다 source·재현 설정·문서를
 commit/push하고 remote 반영을 확인합니다. private 백업, 이미지, keys, 실제
 device identity/fabric/화면은 커밋하지 않습니다.
+
+## 독립 검토
+
+Claude CLI에 이 문서 초안을 stdin으로 제공하고 tools를 비활성화한 검토를
+수행했습니다. archive ownership, 최초 app 자동 시작, MTD 번호 변동, SQLite
+checkpoint와 live raw overlay 일관성, rollback metadata 준비에 관한 지적을
+절차에 반영했습니다. 이 검토는 문서 기반 추론이며 별도 hardware 검증이나
+flash 성공의 증거가 아닙니다. 상세 결과는 private preflight 폴더에 보관합니다.
