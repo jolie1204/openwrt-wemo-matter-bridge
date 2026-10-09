@@ -116,6 +116,16 @@ sha256sum -c SHA256SUMS
    helper의 상수와 별도 결과 경로를 갱신해야 합니다. 주소가 같다고
    가정하거나 기존 debug ELF로 새 프로세스를 해석하지 않습니다. `/proc`
    접근이 거부되면 attach/권한 우회하지 않고 다른 읽기 방법을 검토합니다.
+
+   새 build에는 일반화된 `tools/read_matter_endpoint_baseline.py`를 사용합니다.
+   `manifest` 명령에 정확한 unstripped ELF, cross-GDB, 실제 운영 ELF SHA-256과
+   새 private 출력 경로를 지정합니다. `capture`에는 같은 ELF/manifest,
+   strict SSH host와 별도 private 결과 경로를 지정합니다. 도구는 실행 중
+   ELF의 program headers/loadable 바이트, DWARF 주소/크기, ASLR mapping을
+   검증하고 두 번의 최소 구조 snapshot과 PID가 동일한지 확인합니다.
+   이름/fabric/전체 heap을 읽지 않으며 기존 출력 파일을 덮어쓰지 않습니다.
+   `--help`, `manifest --help`, `capture --help`에서 각 인자를 확인합니다.
+   기존 private 기준 파일은 비교용으로 그대로 보존합니다.
 3. **복구 준비**: 정확한 운영 장치, 패키지 버전, 아키텍처, mount/공간,
    새/롤백 APK의 payload와 전송 해시, 서비스 enable 상태를 다시 확인합니다.
    아래 사전 백업과 실패 시 paired rollback이 준비돼야 합니다.

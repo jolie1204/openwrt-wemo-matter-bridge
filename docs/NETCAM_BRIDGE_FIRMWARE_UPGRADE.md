@@ -65,6 +65,10 @@ config archive는 다음 절차로 만듭니다.
    `/etc/wemo-matter-bridge/matter-onboarding.json`을 보존합니다. 기본 archive에
    없는 필수 파일은 explicit allowlist로 추가합니다. onboarding JSON은
    새로 생성하지 않습니다.
+   실제 운영 장치에는 `/etc/dropbear/authorized_keys`와
+   `/root/.ssh/authorized_keys`가 모두 없었습니다. 기존 image의 root 인증
+   설정을 유지하며 이번 센서 업데이트 때문에 인증 방식을 변경하지 않습니다.
+   따라서 authorized keys는 있을 때만 보존하는 항목이고 필수 파일은 아닙니다.
 4. `sysupgrade -b`가 생성하는 `etc/uci-defaults/10_disable_services`를
    보존해 기존 disabled 서비스 상태를 유지합니다. archive에는 옛 실행
    바이너리나 옛 init/watchdog script를 추가하지 않습니다. 별도로 보관한
@@ -101,6 +105,40 @@ config archive는 다음 절차로 만듭니다.
 `/data`가 mount되지 않으면 새 controller/app을 시작하지 않습니다.
 현재 `wemo_mtd_data`는 data partition이 없을 때 writable `/data`로 fallback하므로
 service 시작 성공만으로 실제 data mount를 보증할 수 없습니다.
+
+host helper는 위 archive 필터링과 hold script 삽입을 재현합니다. 입력과 출력은
+private 폴더에 두고 출력 파일은 매번 새 이름을 사용합니다.
+
+```sh
+python3 scripts/curate_bridge_sysupgrade_backup.py \
+  private/<deployment>/sysupgrade-original.tgz \
+  private/<deployment>/bridge-config-curated.tar.gz \
+  --additional-etc private/<deployment>/etc-private.tar.gz
+python3 -m unittest discover -s scripts/tests \
+  -p test_curate_bridge_sysupgrade_backup.py
+```
+
+`--additional-etc`는 기본 backup에 없는 `etc/wemo_ctrl.conf`,
+`etc/dropbear/authorized_keys`, `etc/fw_env.config`만 추가합니다. 원본의 기존
+파일을 덮어쓰지 않습니다. 필수 설정·보호된 root 소유 SSH host key·기존
+disable-services script가 없거나 위험한 tar path/link/node가 있으면 실패합니다.
+source의 numeric owner/mode를 유지하고 USTAR를 생성하며, 출력은 private 0700
+디렉터리에 exclusive·atomic 방식으로 0600을 사용합니다. 출력은 member 수만
+표시하며 설정 내용을 출력하지 않습니다. fixture 테스트는 실제 key/fabric을
+사용하지 않습니다. 이 helper 성공만으로 target flash 또는 first boot를
+검증했다고 판단하지 않습니다.
+named owner가 numeric owner를 덮어쓰지 않도록 출력 tar의 uname/gname은
+비웁니다. 모든 포함된 SSH host key와 directory의 안전한 owner/mode를
+검사하며, archived link를 경유해 `..` 의미가 달라지는 symlink chain도
+차단합니다. authorized keys는 존재할 때 protected root-owned regular file인지
+검사합니다.
+
+실제 사전 `sysupgrade-original.tar.gz`와 `etc-private.tar.gz`에 helper를
+적용한 host dryrun은 data 226 members를 제외하고 etc 29 members와 hold
+script 1개를 보존했습니다. 모든 출력 member의 numeric owner가 root이며
+hold mode 0755, archive mode 0600과 두 defaults script 포함을 확인했습니다.
+host BusyBox의 archive 읽기도 통과했습니다. 이 사전 archive는 target에
+전송하지 않았으며 flash 직전 final archive를 별도로 생성해야 합니다.
 
 ## 보관한 사전 백업과 flash 직전 백업
 
@@ -165,16 +203,24 @@ service 시작 성공만으로 실제 data mount를 보증할 수 없습니다.
 확인했습니다. 8N1, flow control 없음으로 사용합니다. 기존 NetCam의
 Kermit 57600 절차를 이 MT7628 bridge에 그대로 적용하지 않습니다.
 
-USB adapter의 물리적 연결 대상은 아직 증명하지 않았습니다. 기존 두 NetCam의
-adapter가 아닌 남은 UART도 후보일 뿐입니다. 이 조사에서 console 입력,
-reboot 또는 bootloader 명령을 보내지 않았습니다. 기존 bridge session 문서에는
-sysupgrade 성공 기록은 있으나 검증된 UART 장치/복구 명령 순서가 없습니다.
+뒤이어 운영 담당 main 세션이 사용자가 확인한 USB2를 57600으로 접속해
+실제 bridge U-Boot 응답을 확인했습니다. 현재 OS의 `/dev/ttyUSB2`를
+사용했으며 다른 세션의 옛 USB 번호와 혼동하지 않습니다. 재접속 시에는
+USB 번호와 console 대상의 board/boot 증거를 다시 확인합니다.
 
-flash 전 담당 세션은 bridge에 연결된 UART를 특정하고 bootloader prompt와
-실제 `bootA`/boot command, RAM load 주소, 지원 transfer 방식, flash 쓰기
-명령을 확인해야 합니다. 실제로 확인되지 않은 TFTP/Kermit 명령이나 vendor
-dual-slot fallback을 복구 수단으로 선언하지 않습니다. 새 DTS는 vendor
-dual-slot layout과 다르므로 임의 bootB fallback은 금지합니다.
+boot menu 4에서 U-Boot CLI와 `help`를 확인했고 `bootm`, `tftpboot`,
+`erase`, `cp`, `spi`, `reset` 명령이 존재했습니다. 실제 `printenv`에서
+`boot_A_adr=0xBC050000`, boot A arguments는 `console=ttyS0,57600n8
+root=/dev/mtdblock2`, `bootstate=0`으로 확인했습니다. main 세션은 `reset`으로
+기존 kernel의 부팅과 서비스/SSH 복귀 및 data mount를 확인했습니다.
+serial 증거는 private에 보관합니다. 이 단계는 transfer나 flash 명령을
+실행해 복구 전체 경로를 검증한 시험이 아닙니다.
+
+실제 transfer protocol, RAM load 주소, 크기·명령 syntax에 따른 erase/write
+순서는 아직 시험하지 않았습니다. flash 전에 이 bootloader의 명령 사용법과
+안전한 범위를 다시 확인하며 NetCam Kermit 절차를 적용하지 않습니다.
+vendor dual-slot fallback을 복구 수단으로 선언하지 않습니다. 새 DTS는
+vendor dual-slot layout과 다르므로 임의 bootB fallback은 금지합니다.
 
 보관한 raw `mtd8-firmware.bin`은 전송 size/SHA 일치를 확인한 dump입니다.
 immutable kernel/squashfs는 보존됐으나 mounted JFFS2 overlay의 파일 간
@@ -224,3 +270,7 @@ Claude CLI에 이 문서 초안을 stdin으로 제공하고 tools를 비활성�
 checkpoint와 live raw overlay 일관성, rollback metadata 준비에 관한 지적을
 절차에 반영했습니다. 이 검토는 문서 기반 추론이며 별도 hardware 검증이나
 flash 성공의 증거가 아닙니다. 상세 결과는 private preflight 폴더에 보관합니다.
+별도로 helper 소스·fixture를 같은 방식으로 검토했고 symlink chain,
+numeric/name owner 차이, directory permissions, 모든 host key 검증과
+손상 gzip 오류 처리를 보완했습니다. 실제 fixture suite 결과는 commit
+milestone 기록과 함께 보고합니다.

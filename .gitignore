@@ -37,3 +37,4 @@ git-src
 .ccache
 .vscode*
 /private/
+__pycache__/
