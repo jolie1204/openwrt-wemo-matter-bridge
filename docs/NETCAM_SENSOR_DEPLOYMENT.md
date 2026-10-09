@@ -80,13 +80,42 @@ sha256sum -c SHA256SUMS
    설치 공간 대책이 없으면 `apk add`를 실행하지 않습니다.
    `/data`로 바이너리 이동, 파일/패키지 삭제, 브리지 FW flash를 자동 선택하지
    말고 구체적인 대책과 복구 방법을 별도로 검토합니다.
-2. **기존 endpoint 기준값**: 실제 commissioned 관리자로 Descriptor
-   PartsList, endpoint ID/device type/unique identity를 private 기록에 확보해야
-   합니다. Google Home만 사용하며 기존 별도 admin reader는 찾지 못했습니다.
-   S20+의 기존 기기/브리지 화면은 읽기 전용으로 확인했지만 실제 ID 읽기와는
-   다릅니다. host allocator 회귀를 현재 운영 mapping의 증명으로 사용하지
-   않습니다. 기존 관리자의 읽기 경로를 조사하고, 기준값 수집 방법이 없으면
-   이 조건의 해결 방안을 검토하기 전 배포를 진행하지 않습니다.
+2. **기존 endpoint 기준값**: 2026-10-09 운영 서버의 실제 runtime 기준을
+   `private/netcam-deployment-2026-10-09/evidence/runtime-endpoints/baseline.json`에
+   확보했습니다. 운영 ELF와 기존 unstripped ELF의 24개 SHF_ALLOC section
+   바이트를 대조하고, 해당 ELF의 symbol/DWARF layout과 ASLR base를 사용해
+   root의 `/proc/PID/mem`을 읽었습니다. ptrace attach, 서비스 정지/재시작,
+   commissioning 또는 전원 제어를 하지 않았습니다. 두 연속 snapshot은
+   같았고 PID도 유지됐습니다. 고정 endpoint는 0/1/2, 기존 동적 endpoint는
+   3~16의 14개입니다. 각 device object의 ID/parent와 실제 등록 table이
+   일치하며 UniqueID도 모두 확보했습니다. 기기 이름/UniqueID는 private
+   파일에만 보관합니다.
+
+   이것은 **commissioned 관리자의 Descriptor PartsList 읽기가 아닙니다**.
+   Google Home의 캐시/표시/사용 가능성을 증명하지 않으며, 실행을 정지하지
+   않은 반복 memory snapshot입니다. 별도 admin reader는 여전히 없습니다.
+   배포 gate는 이 실제 서버 기준과 flash 후 동일한 방법으로 읽은 등록 상태를
+   비교하고, Google Home에서 기존 기기의 표시와 실제 기능을 확인하는 것으로
+   구체화합니다. 기존 14개의 endpoint ID, device type 목록/revision,
+   UniqueID, parent가 모두 같아야 합니다. 새로운 NetCam endpoint가 추가되어도
+   기존 mapping 변경을 허용하지 않습니다. 값이 다르면 증거를 보존하고
+   원인을 확인하거나 복구하며, 재commissioning으로 통과시키지 않습니다.
+
+   private helper는 다음과 같이 기존 운영 ELF에 한해 재실행할 수 있습니다.
+
+   ```sh
+   python3 private/netcam-deployment-2026-10-09/evidence/runtime-endpoints/read_baseline.py
+   ```
+
+   **현재 helper는 기존 운영 build 전용**입니다. `EXPECTED`, `DEBUG`,
+   gDevices/emAfEndpoints symbol 주소, table 개수 및 object offset을 고정했고,
+   출력은 `baseline.json`을 덮어씁니다. 최초 기준을 별도 private 파일로
+   보존한 뒤 재실행합니다. 새 FW에는 그대로 실행하지 않습니다. 새 운영
+   ELF를 읽기 전용으로 가져와 새 image의 unstripped ELF와 loadable 바이트,
+   program-header 주소/크기, symbols 및 DWARF layout을 다시 검증하고,
+   helper의 상수와 별도 결과 경로를 갱신해야 합니다. 주소가 같다고
+   가정하거나 기존 debug ELF로 새 프로세스를 해석하지 않습니다. `/proc`
+   접근이 거부되면 attach/권한 우회하지 않고 다른 읽기 방법을 검토합니다.
 3. **복구 준비**: 정확한 운영 장치, 패키지 버전, 아키텍처, mount/공간,
    새/롤백 APK의 payload와 전송 해시, 서비스 enable 상태를 다시 확인합니다.
    아래 사전 백업과 실패 시 paired rollback이 준비돼야 합니다.
