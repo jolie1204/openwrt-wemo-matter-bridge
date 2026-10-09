@@ -97,6 +97,18 @@ char *wemoServiceName[] = {
    wemoControl
  */
 
+#include "netcam_motion.h"
+
+static int wemoNetcamSnapshot(const char *UDN, IXML_Document *doc, int is_event);
+static int wemoIsNetcamUDN(const char *UDN)
+{
+    struct wemoDeviceNode *node;
+    for (node = GlobalDeviceList; node; node = node->next)
+        if (!strcmp(node->device.UDN, UDN))
+            return !strcmp(node->device.deviceType, "urn:Belkin:device:NetCamSensor:1");
+    return 0;
+}
+
 char *wemoVarName[WEMO_SERVICE_COUNT][CTRLPT_MAXVARS] = {
     {"NetworkStatus", ""},
     {"", ""},
@@ -709,7 +721,7 @@ void wemoCtrlPointAddDevice( IXML_Document *DescDoc,
     }
     baseURL = ctrlpt_util_GetFirstDocumentItem( DescDoc, "URLBase" );
 
-    if ((relURL = ctrlpt_util_GetFirstDocumentItem( DescDoc, "presentationURL" )) == NULL) {
+    if ((relURL = ctrlpt_util_GetFirstDocumentItem( DescDoc, "presentationURL" )) == NULL && strcmp(deviceType, "urn:Belkin:device:NetCamSensor:1")) {
         // LOG_DEBUG_MSG("presentationURL retrieval failed for %s", location);
         goto add_failed;
     }
@@ -722,17 +734,26 @@ void wemoCtrlPointAddDevice( IXML_Document *DescDoc,
         LOG_ERROR_MSG("modelName retrieval failed for %s", location);
         goto add_failed;
     }
-    if ((serialNumber = ctrlpt_util_GetFirstDocumentItem( DescDoc, "serialNumber")) == NULL) {
+    if ((serialNumber = ctrlpt_util_GetFirstDocumentItem( DescDoc, "serialNumber")) == NULL && strcmp(deviceType, "urn:Belkin:device:NetCamSensor:1")) {
         LOG_ERROR_MSG("serialNumber retrieval failed for %s", location);
         goto add_failed;
     }
     binaryState = ctrlpt_util_GetFirstDocumentItem( DescDoc, "binaryState");
     brightness = ctrlpt_util_GetFirstDocumentItem( DescDoc, "brightness");
-    if ((firmwareversion = ctrlpt_util_GetFirstDocumentItem( DescDoc, "firmwareVersion")) == NULL) {
+    if ((firmwareversion = ctrlpt_util_GetFirstDocumentItem( DescDoc, "firmwareVersion")) == NULL && strcmp(deviceType, "urn:Belkin:device:NetCamSensor:1")) {
         //LOG_ERROR_MSG("firmwareVersion retrieval failed for %s", location);
         goto add_failed;
     }
 
+    if (!strcmp(deviceType, "urn:Belkin:device:NetCamSensor:1") &&
+        (strlen(UDN) >= WE_DEVICE_UDN_LEN || strlen(location) >= sizeof(presURL) ||
+         (baseURL && strlen(baseURL) >= sizeof(presURL)) ||
+         (relURL && strlen(relURL) + strlen(baseURL ? baseURL : location) >= sizeof(presURL))))
+        goto add_failed;
+    if (!relURL) relURL = strdup("/");
+    if (!serialNumber) serialNumber = strdup("");
+    if (!firmwareversion) firmwareversion = strdup("unknown");
+    if (!binaryState) binaryState = strdup("0");
     ret = UpnpResolveURL(( baseURL ? baseURL : location ), relURL, presURL);
 
     if( UPNP_E_SUCCESS != ret )
@@ -826,6 +847,7 @@ void wemoCtrlPointAddDevice( IXML_Document *DescDoc,
             deviceNode = (struct wemoDeviceNode *) malloc(sizeof(struct wemoDeviceNode ));
             memset(deviceNode, 0, sizeof(struct wemoDeviceNode));
 
+            wemo_copy_str(deviceNode->device.deviceType, sizeof(deviceNode->device.deviceType), deviceType, "deviceType");
             wemo_copy_str(deviceNode->device.UDN, sizeof(deviceNode->device.UDN), UDN, "UDN");
             wemo_copy_str(deviceNode->device.DescDocURL, sizeof(deviceNode->device.DescDocURL), location, "DescDocURL");
             if (ctrlpt_util_retrieve_ip_from_url(location, ipaddr)) {
@@ -862,7 +884,6 @@ void wemoCtrlPointAddDevice( IXML_Document *DescDoc,
             //Notify New Device Added
             ctrlpt_util_StateUpdate(NULL, NULL, deviceNode->device.UDN,
                                      DEVICE_ADDED );
-            wemoCtrlPointSubscribeDeviceEvents(deviceNode, TimeOut);
             wemo_dev_db_insert(ctrlpt_dev_db, &(deviceNode->device));
 
             int id = 0;
@@ -883,6 +904,12 @@ void wemoCtrlPointAddDevice( IXML_Document *DescDoc,
                 }
 
                 wemo_dev_statedb_insert(ctrlpt_state_db, id, 1, buffer);
+                if (!strcmp(deviceType, "urn:Belkin:device:NetCamSensor:1")) {
+                    int previous = wemo_dev_db_get_capability(ctrlpt_state_db, id, CAP_MOTION_SNAPSHOT);
+                    wemo_dev_db_update_capability(ctrlpt_state_db, id, CAP_MOTION_SNAPSHOT, previous >= 0 && previous <= 13 ? previous & 1 : 0);
+                    wemo_dev_db_update_capability(ctrlpt_state_db, id, CAP_MOTION_SEEN, 0);
+                }
+                wemoCtrlPointSubscribeDeviceEvents(deviceNode, TimeOut);
 
                 struct we_state state_buffer;
                 state_buffer.is_online = 1;
@@ -1839,6 +1866,11 @@ wemoStateUpdate( char *UDN,
     state_buffer.level = -1;
 
     LOG_DEBUG_MSG("wemo State Update (service %d): ", Service );
+    if (Service == WEMO_SERVICE_BASICEVENT && wemoIsNetcamUDN(UDN))
+    {
+        send_ack = wemoNetcamSnapshot(UDN, ChangedVariables, 1);
+        wemo_id = wemo_dev_db_retrieve_id(ctrlpt_dev_db, UDN);
+    }
 
     /*
        Find all of the e:property tags in the document
@@ -2067,6 +2099,35 @@ wemoNameValueState( char *UDN,
     }
 }
 
+static int wemoNetcamSnapshot(const char *UDN, IXML_Document *doc, int is_event)
+{
+    int id = wemo_dev_db_retrieve_id(ctrlpt_dev_db, (char *)UDN);
+    int previous = wemo_dev_db_get_capability(ctrlpt_state_db, id, CAP_MOTION_SNAPSHOT);
+    char *binary = doc ? ctrlpt_util_GetFirstDocumentItem(doc, "BinaryState") : NULL;
+    char *mode = doc ? ctrlpt_util_GetFirstDocumentItem(doc, "MotionState") : NULL;
+    char *available = doc ? ctrlpt_util_GetFirstDocumentItem(doc, "DetectionAvailable") : NULL;
+    int packed = doc ? netcam_motion_parse(binary, mode, available, previous) :
+        (previous >= 0 && previous <= 13 ? previous & 1 : 0);
+    if (doc && !binary && !mode && !available) return 0; // unrelated GENA properties
+    if (is_event && binary && (!mode || !available)) {
+        struct wemoDeviceNode *node;
+        int legacy = 0;
+        for (node = GlobalDeviceList; node; node = node->next)
+            if (!strcmp(node->device.UDN, UDN)) legacy = node->device.motion_action_legacy;
+        if (!legacy) { free(binary); free(mode); free(available); return 0; }
+    }
+    if (mode && available && (packed >> 1) != NC_UNKNOWN) {
+        struct wemoDeviceNode *node;
+        for (node = GlobalDeviceList; node; node = node->next)
+            if (!strcmp(node->device.UDN, UDN)) node->device.motion_action_legacy = 0;
+    }
+    if (id) {
+        wemo_dev_db_update_motion(id, packed, doc && (packed >> 1) != NC_UNKNOWN ? (int)time(NULL) : 0);
+    }
+    free(binary); free(mode); free(available);
+    return packed != previous;
+}
+
 void wemoCtrlPointHandleActionComplete(UpnpActionComplete *event)
 {
     IXML_Document *action_result = NULL;
@@ -2083,8 +2144,9 @@ void wemoCtrlPointHandleActionComplete(UpnpActionComplete *event)
     int wemo_id = 0;
 
     ctrlUrl = UpnpActionComplete_get_CtrlUrl_cstr(event);
+    if (!ctrlUrl) return;
 
-    action_result = UpnpActionComplete_get_ActionResult(event);
+    action_result = UpnpActionComplete_get_ErrCode(event) == UPNP_E_SUCCESS ? UpnpActionComplete_get_ActionResult(event) : NULL;
     /* Disable below code to send notification back to homekit when actioncomplete happens */
     if (action_result) {
         LOG_DEBUG_MSG("%s", ixmlNode_getLocalName(ixmlNode_getFirstChild(&action_result->n)));
@@ -2102,6 +2164,23 @@ void wemoCtrlPointHandleActionComplete(UpnpActionComplete *event)
         }
         for (service = 0; service < WEMO_SERVICE_COUNT; service++) {
             if (strcmp(tmpdevnode->device.wemoService[service].ControlURL, ctrlUrl) == 0) {
+                IXML_Document *request = UpnpActionComplete_get_ActionRequest(event);
+                IXML_Node *requestRoot = request ? ixmlNode_getFirstChild(&request->n) : NULL;
+                const char *action = requestRoot ? ixmlNode_getLocalName(requestRoot) : NULL;
+                if (service == WEMO_SERVICE_BASICEVENT && !strcmp(tmpdevnode->device.deviceType, "urn:Belkin:device:NetCamSensor:1") &&
+                    action && (!strcmp(action, "GetMotionStatus") || !strcmp(action, "GetBinaryState"))) {
+                    int error = UpnpActionComplete_get_ErrCode(event);
+                    wemoNetcamSnapshot(tmpdevnode->device.UDN, error == UPNP_E_SUCCESS ? action_result : NULL, 0);
+                    if (error == 401 && !strcmp(action, "GetMotionStatus") && !tmpdevnode->device.motion_action_legacy) {
+                        IXML_Document *fallback = UpnpMakeAction("GetBinaryState", wemoServiceType[service], 0, NULL);
+                        tmpdevnode->device.motion_action_legacy = 1;
+                        if (fallback) {
+                            UpnpSendActionAsync(ctrlpt_handle, ctrlUrl, wemoServiceType[service], NULL, fallback,
+                                                (Upnp_FunPtr)wemoCtrlPointCallbackEventHandler, NULL);
+                            ixmlDocument_free(fallback);
+                        }
+                    }
+                }
                 if (action_result) {
                     if ((binaryStateItem = ctrlpt_util_GetFirstDocumentItem(action_result, "BinaryState"))) {
                         if (!strcmp(binaryStateItem, "Error")) {
@@ -2498,7 +2577,11 @@ int wemoCtrlPointCallbackEventHandler(Upnp_EventType EventType, void *Event, voi
 				wemoStateRefreshRecordCtrlUrlResult(ctrlUrl, 0);
 				if (wemoCtrlPointFindUDNfromCtrlUrl(ctrlUrl, udn) > 0) {
 					LOG_DEBUG_MSG("Found problem on device UDN -- %s", udn);
-					wemoCtrlPointRefresh();
+                    ithread_mutex_lock(&DeviceListMutex);
+                    int netcam = wemoIsNetcamUDN(udn);
+                    ithread_mutex_unlock(&DeviceListMutex);
+                    if (netcam) wemoCtrlPointHandleActionComplete(a_event);
+                    else wemoCtrlPointRefresh();
 				}
 			} else {
 				wemoStateRefreshRecordCtrlUrlResult(ctrlUrl, 1);

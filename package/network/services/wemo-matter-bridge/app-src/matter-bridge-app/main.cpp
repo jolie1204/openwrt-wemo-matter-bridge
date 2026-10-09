@@ -1,3 +1,7 @@
+#include "wemo_bridge/endpoint_registry.h"
+#include "wemo_bridge/sensor_endpoint_id_guard.h"
+#include "wemo_bridge/published_slot.h"
+#include "wemo_bridge/motion_sensor_state.h"
 /*
  *
  *    Copyright (c) 2021 Project CHIP Authors
@@ -336,6 +340,24 @@ DECLARE_DYNAMIC_CLUSTER(OnOff::Id, onOffAttrs, ZAP_CLUSTER_MASK(SERVER), onOffIn
 
 DECLARE_DYNAMIC_ENDPOINT(bridgedDimmableLightEndpoint, bridgedDimmableLightClusters);
 
+// Camera image analysis is Vision, never PIR. Deprecated legacy type is
+// compatibility-only (zero); SensorTypeBitmap has no PIR/US/contact bits.
+DECLARE_DYNAMIC_ATTRIBUTE_LIST_BEGIN(occupancyAttrs)
+DECLARE_DYNAMIC_ATTRIBUTE(OccupancySensing::Attributes::Occupancy::Id, BITMAP8, 1, 0),
+DECLARE_DYNAMIC_ATTRIBUTE(OccupancySensing::Attributes::OccupancySensorType::Id, ENUM8, 1, 0),
+DECLARE_DYNAMIC_ATTRIBUTE(OccupancySensing::Attributes::OccupancySensorTypeBitmap::Id, BITMAP8, 1, 0),
+DECLARE_DYNAMIC_ATTRIBUTE(OccupancySensing::Attributes::FeatureMap::Id, BITMAP32, 4, 0),
+DECLARE_DYNAMIC_ATTRIBUTE(OccupancySensing::Attributes::ClusterRevision::Id, INT16U, 2, 0),
+DECLARE_DYNAMIC_ATTRIBUTE_LIST_END();
+DECLARE_DYNAMIC_CLUSTER_LIST_BEGIN(bridgedOccupancyClusters)
+DECLARE_DYNAMIC_CLUSTER(OccupancySensing::Id, occupancyAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr, nullptr),
+DECLARE_DYNAMIC_CLUSTER(Identify::Id, identifyAttrs, ZAP_CLUSTER_MASK(SERVER), identifyIncomingCommands, nullptr),
+DECLARE_DYNAMIC_CLUSTER(Descriptor::Id, descriptorAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr, nullptr),
+DECLARE_DYNAMIC_CLUSTER(BridgedDeviceBasicInformation::Id, bridgedDeviceBasicAttrs, ZAP_CLUSTER_MASK(SERVER), nullptr, nullptr)
+DECLARE_DYNAMIC_CLUSTER_LIST_END;
+DECLARE_DYNAMIC_ENDPOINT(bridgedOccupancyEndpoint, bridgedOccupancyClusters);
+const EmberAfDeviceType gBridgedOccupancyDeviceTypes[] = {{0x0107, 4}, {DEVICE_TYPE_BRIDGED_NODE, DEVICE_VERSION_DEFAULT}};
+
 DeviceOnOff Light1("Light 1", "Office");
 DeviceOnOff Light2("Light 2", "Office");
 
@@ -374,9 +396,12 @@ struct BridgedWemoLight
     using RegisteredIdentifyCluster = RegisteredServerCluster<Clusters::IdentifyCluster>;
 
     int wemo_id = 0;
+    int device_type = 0;
     std::string udn;
     bool is_dimmable = false;
     bool is_plug = false;
+    bool is_sensor = false;
+    int motion_snapshot = 0;
     std::unique_ptr<Device> device;  // DeviceOnOff or DeviceDimmable
     std::unique_ptr<RegisteredIdentifyCluster> identifyCluster;
     std::array<DataVersion, kMaxBridgedClusters> dataVersions {};
@@ -530,7 +555,7 @@ int AddDeviceEndpoint(Device * dev, EmberAfEndpointType * ep, const Span<const E
 #if CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
                       chip::CharSpan epUniqueId,
 #endif
-                      chip::EndpointId parentEndpointId = chip::kInvalidEndpointId)
+                      chip::EndpointId parentEndpointId = chip::kInvalidEndpointId, bool exactEndpointId = false)
 {
     uint8_t index = 0;
     while (index < CHIP_DEVICE_CONFIG_DYNAMIC_ENDPOINT_COUNT)
@@ -564,7 +589,7 @@ int AddDeviceEndpoint(Device * dev, EmberAfEndpointType * ep, const Span<const E
 
                     return index;
                 }
-                if (err != CHIP_ERROR_ENDPOINT_EXISTS)
+                if (err != CHIP_ERROR_ENDPOINT_EXISTS || exactEndpointId)
                 {
                     gDevices[index] = nullptr;
                     return -1;
@@ -773,7 +798,7 @@ std::string ProductNameForEntry(const BridgedWemoLight * entry)
     {
         return "Wemo Plug";
     }
-    return "Wemo Light";
+    return entry->is_sensor ? "Wemo Sensor" : "Wemo Light";
 }
 
 void ScheduleBasicInfoMetadataReports(Device * dev)
@@ -1175,6 +1200,9 @@ Protocols::InteractionModel::Status HandleWriteBridgedDeviceBasicAttribute(Devic
         return Protocols::InteractionModel::Status::UnsupportedWrite;
     }
 
+    for (const auto &entry : gBridgedWemoLights)
+        if (entry.device.get() == dev && entry.is_sensor) return Protocols::InteractionModel::Status::UnsupportedWrite;
+
     CharSpan nameSpan = CharSpan::fromZclString(buffer);
 
     if (nameSpan.size() > kNodeLabelSize)
@@ -1238,6 +1266,30 @@ Protocols::InteractionModel::Status HandleReadTempMeasurementAttribute(DeviceTem
     return Protocols::InteractionModel::Status::Success;
 }
 
+void HandleOccupancyStatusChanged(DeviceOnOff *dev, DeviceOnOff::Changed_t mask)
+{
+    HandleDeviceStatusChanged(dev, static_cast<Device::Changed_t>(mask));
+    if (mask & DeviceOnOff::kChanged_OnOff)
+        ScheduleReportingCallback(dev, OccupancySensing::Id, OccupancySensing::Attributes::Occupancy::Id);
+}
+
+Protocols::InteractionModel::Status HandleReadOccupancyAttribute(DeviceOnOff *dev, chip::AttributeId id,
+                                                                 uint8_t *buffer, uint16_t length)
+{
+    using namespace OccupancySensing::Attributes;
+    if (id == Occupancy::Id && length == 1) *buffer = dev->IsOn() ? 1 : 0;
+    else if (id == OccupancySensorType::Id && length == 1) *buffer = 0; // deprecated compatibility enum
+    else if (id == OccupancySensorTypeBitmap::Id && length == 1) *buffer = 0;
+    else if (id == FeatureMap::Id && length == 4) {
+        const auto *entry = FindWemoEntry(dev);
+        uint32_t features = entry && entry->device_type == 8 ? 1u << 7 : 1u; // Vision vs unspecified legacy modality
+        memcpy(buffer, &features, 4);
+    }
+    else if (id == ClusterRevision::Id && length == 2) { uint16_t revision = 5; memcpy(buffer, &revision, 2); }
+    else return Protocols::InteractionModel::Status::Failure;
+    return Protocols::InteractionModel::Status::Success;
+}
+
 Protocols::InteractionModel::Status emberAfExternalAttributeReadCallback(EndpointId endpoint, ClusterId clusterId,
                                                                          const EmberAfAttributeMetadata * attributeMetadata,
                                                                          uint8_t * buffer, uint16_t maxReadLength)
@@ -1262,6 +1314,10 @@ Protocols::InteractionModel::Status emberAfExternalAttributeReadCallback(Endpoin
         {
             ret = HandleReadLevelControlAttribute(static_cast<DeviceDimmable *>(dev), attributeMetadata->attributeId, buffer,
                                                    maxReadLength);
+        }
+        else if (clusterId == OccupancySensing::Id)
+        {
+            ret = HandleReadOccupancyAttribute(static_cast<DeviceOnOff *>(dev), attributeMetadata->attributeId, buffer, maxReadLength);
         }
         else if (clusterId == TemperatureMeasurement::Id)
         {
@@ -1580,6 +1636,7 @@ struct WemoEventContext
     bool is_online;
     int state;
     int level; // 0-100 or -1
+    int motion_snapshot;
 };
 
 void HandleWemoEventOnMatterThread(intptr_t closure)
@@ -1588,9 +1645,19 @@ void HandleWemoEventOnMatterThread(intptr_t closure)
     const auto now = std::chrono::steady_clock::now();
     for (auto & entry : gBridgedWemoLights)
     {
-        if (entry.wemo_id == ctx->wemo_id)
+        if (wemo_bridge::PublishedSlotMatches(entry, ctx->wemo_id))
         {
             auto * dev = entry.device.get();
+
+            // Sensor validity comes from the atomic cached snapshot, not raw BinaryState.
+            if (entry.is_sensor) {
+                auto *sensor = static_cast<DeviceOnOff *>(dev);
+                const auto observed = wemo_bridge::ApplyMotionSensorSnapshot(ctx->motion_snapshot, ctx->is_online, sensor->IsOn());
+                dev->SetReachable(observed.reachable);
+                entry.motion_snapshot = ctx->motion_snapshot;
+                sensor->SetOnOff(observed.occupied);
+                continue;
+            }
 
             // Reachability always updates immediately.
             if (dev->IsReachable() != ctx->is_online)
@@ -1782,9 +1849,12 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
 
     *slot = BridgedWemoLight {};
     slot->wemo_id = dev.wemo_id;
+    slot->device_type = dev.device_type;
     slot->udn = dev.udn;
     slot->is_dimmable = dev.supports_level;
     slot->is_plug = dev.is_plug;
+    slot->is_sensor = dev.is_sensor;
+    slot->motion_snapshot = dev.motion_snapshot;
     UpdateWemoMetadata(*slot, dev);
     const std::string name = dev.friendly_name.empty() ? std::string("WeMo Device") : dev.friendly_name;
 
@@ -1792,7 +1862,18 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
     const EmberAfDeviceType * deviceTypes;
     size_t deviceTypesCount;
 
-    if (dev.supports_level)
+    if (dev.is_sensor)
+    {
+        auto sensor = std::make_unique<DeviceOnOff>(name.c_str(), "WeMo");
+        const auto observed = wemo_bridge::ApplyMotionSensorSnapshot(dev.motion_snapshot, dev.is_online, false);
+        sensor->SetOnOff(observed.occupied);
+        sensor->SetReachable(observed.reachable);
+        slot->device = std::move(sensor);
+        epType = &bridgedOccupancyEndpoint;
+        deviceTypes = gBridgedOccupancyDeviceTypes;
+        deviceTypesCount = MATTER_ARRAY_SIZE(gBridgedOccupancyDeviceTypes);
+    }
+    else if (dev.supports_level)
     {
         auto dimmer = std::make_unique<DeviceDimmable>(name.c_str(), "WeMo");
         dimmer->SetOnOff(dev.onoff != 0);
@@ -1827,13 +1908,21 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
         ChipLogProgress(DeviceLayer, "WeMo bind (on/off): %s <- %s", name.c_str(), slot->udn.c_str());
     }
 
-    const size_t clusterCount = slot->is_dimmable ? MATTER_ARRAY_SIZE(bridgedDimmableLightClusters) :
+    const size_t clusterCount = slot->is_sensor ? MATTER_ARRAY_SIZE(bridgedOccupancyClusters) : slot->is_dimmable ? MATTER_ARRAY_SIZE(bridgedDimmableLightClusters) :
                                 slot->is_plug     ? MATTER_ARRAY_SIZE(bridgedOnOffPlugClusters) :
                                                     MATTER_ARRAY_SIZE(bridgedLightClusters);
 
+    wemo_bridge::SensorEndpointIdGuard sensorIdGuard(gCurrentEndpointId, slot->is_sensor);
+    if (slot->is_sensor) {
+        const char *path = std::getenv("WEMO_SENSOR_ENDPOINT_DB");
+        wemo_bridge::EndpointRegistry registry(path ? path : "/data/wemo-matter/sensor_endpoints.db", 0x8000);
+        auto assigned = registry.GetOrAssign(slot->udn);
+        if (!assigned) { wemo_bridge::ClearUnpublishedSlot(*slot); return false; }
+        sensorIdGuard.Assign(*assigned);
+    }
 #if !CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
     const int addedIndex = AddDeviceEndpoint(slot->device.get(), epType, Span<const EmberAfDeviceType>(deviceTypes, deviceTypesCount),
-                                             Span<DataVersion>(slot->dataVersions.data(), clusterCount), 1);
+                                             Span<DataVersion>(slot->dataVersions.data(), clusterCount), 1, slot->is_sensor);
 #else
     std::string epUniqueId = slot->udn;
     if (epUniqueId.rfind("uuid:", 0) == 0)
@@ -1846,18 +1935,16 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
     }
     CharSpan udnSpan(epUniqueId.c_str(), epUniqueId.size());
     const int addedIndex = AddDeviceEndpoint(slot->device.get(), epType, Span<const EmberAfDeviceType>(deviceTypes, deviceTypesCount),
-                                             Span<DataVersion>(slot->dataVersions.data(), clusterCount), udnSpan, 1);
+                                             Span<DataVersion>(slot->dataVersions.data(), clusterCount), udnSpan, 1, slot->is_sensor);
 #endif
     if (addedIndex < 0)
     {
         ChipLogError(DeviceLayer, "Failed to publish WeMo device %s (udn=%s)", name.c_str(), slot->udn.c_str());
-        slot->device.reset();
-        slot->wemo_id = 0;
-        slot->udn.clear();
+        wemo_bridge::ClearUnpublishedSlot(*slot);
         return false;
     }
 
-    if (slot->is_plug)
+    if (slot->is_plug || slot->is_sensor)
     {
         auto identifyCluster = std::make_unique<BridgedWemoLight::RegisteredIdentifyCluster>(
             Clusters::IdentifyCluster::Config(slot->device->GetEndpointId(), sIdentifyTimerDelegate)
@@ -1870,9 +1957,7 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
             ChipLogError(DeviceLayer, "Failed to register Identify for WeMo plug %s: %" CHIP_ERROR_FORMAT, name.c_str(),
                          err.Format());
             RemoveDeviceEndpoint(slot->device.get());
-            slot->device.reset();
-            slot->wemo_id = 0;
-            slot->udn.clear();
+            wemo_bridge::ClearUnpublishedSlot(*slot);
             return false;
         }
         slot->identifyCluster = std::move(identifyCluster);
@@ -1880,7 +1965,11 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
                         slot->device->GetEndpointId());
     }
 
-    if (slot->is_dimmable)
+    if (slot->is_sensor)
+    {
+        static_cast<DeviceOnOff *>(slot->device.get())->SetChangeCallback(&HandleOccupancyStatusChanged);
+    }
+    else if (slot->is_dimmable)
     {
         gLevelControlSettings[slot->device.get()] = LevelControlSettings {};
         emberAfLevelControlClusterServerInitCallback(slot->device->GetEndpointId());
@@ -1953,7 +2042,7 @@ void UpdatePublishedWemoDevice(BridgedWemoLight & entry, const wemo_bridge::Wemo
         return;
     }
 
-    if (entry.is_dimmable != dev.supports_level || entry.is_plug != dev.is_plug)
+    if (entry.is_dimmable != dev.supports_level || entry.is_plug != dev.is_plug || entry.is_sensor != dev.is_sensor)
     {
         RemovePublishedWemoDevice(entry);
         return;
@@ -1979,6 +2068,14 @@ void UpdatePublishedWemoDevice(BridgedWemoLight & entry, const wemo_bridge::Wemo
         ChipLogProgress(DeviceLayer, "Updated WeMo Matter label: %s <- %s", name.c_str(), entry.udn.c_str());
     }
 
+    if (entry.is_sensor) {
+        auto *sensor = static_cast<DeviceOnOff *>(entry.device.get());
+        const auto observed = wemo_bridge::ApplyMotionSensorSnapshot(dev.motion_snapshot, dev.is_online, sensor->IsOn());
+        entry.motion_snapshot = dev.motion_snapshot;
+        entry.device->SetReachable(observed.reachable);
+        sensor->SetOnOff(observed.occupied);
+        return;
+    }
     if (entry.device->IsReachable() != dev.is_online)
     {
         entry.device->SetReachable(dev.is_online);
@@ -2166,6 +2263,7 @@ void ApplicationInit()
         ctx->is_online   = ev.is_online;
         ctx->state       = ev.state;
         ctx->level       = ev.level;
+        ctx->motion_snapshot = ev.motion_snapshot;
         TEMPORARY_RETURN_IGNORED PlatformMgr().ScheduleWork(HandleWemoEventOnMatterThread, reinterpret_cast<intptr_t>(ctx));
     });
 

@@ -8,7 +8,7 @@
 
 #define IPC_DATA_MAX 8192
 #define WE_PROTO_MAGIC 0x57454d4fU /* "WEMO" */
-#define WE_PROTO_VERSION 2
+#define WE_PROTO_VERSION 3
 
 #define STATE_DISCONNECTED		            0
 #define STATE_CONNECTED			            1
@@ -101,13 +101,16 @@ typedef enum {
     WEMO_DIMMER,
     WEMO_INSIGHT,
     WEMO_SENSOR,
-    WEMO_UNKNOWN
+    WEMO_UNKNOWN,
+    WEMO_NETCAM_SENSOR
 } dev_id_t;
 
 typedef enum {
     CAP_NONE,
     CAP_BINARY,
     CAP_LEVEL,
+    CAP_MOTION_SNAPSHOT,
+    CAP_MOTION_SEEN,
     CAP_FUTURE
 } cap_t;
 
@@ -169,6 +172,7 @@ struct we_state {
     /* Dimming range (0 - 100) */
     /* only applicable to dimming capable devices */
     int level;
+    int motion_snapshot; /* v3 atomic sensor state; zero is unknown */
 };
 
 struct we_firmware_data {
@@ -292,6 +296,7 @@ struct we_device_info {
     int32_t is_online;
     int32_t state;        /* 0=off, 1=on */
     int32_t level;        /* 0-100, or -1 if unsupported */
+    int32_t motion_snapshot; /* packed netcam_motion.h state; zero is unknown */
     char udn[WE_DEVICE_UDN_LEN];
     char friendly_name[WE_DEVICE_NAME_LEN];
     char model_name[WE_DEVICE_MODEL_LEN];

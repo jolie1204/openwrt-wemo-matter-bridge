@@ -101,6 +101,7 @@ struct wemoDevice {
     char FriendlyName[NAME_SIZE];
     char PresURL[NAME_SIZE];
     int  AdvrTimeOut;
+    int motion_action_legacy; /* Invalid Action fallback is per boot/discovery */
     char deviceType[NAME_SIZE];
     char manufacturer[NAME_SIZE];
     char modelName[NAME_SIZE];

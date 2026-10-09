@@ -3,6 +3,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "wemo_bridge/wemo_adapter.h"
 
@@ -26,6 +27,9 @@ private:
     std::string mEngineSocket;
     mutable std::mutex mCacheMutex;
     std::unordered_map<std::string, int> mUdnToWemoId;
+    std::vector<WemoDevice> mLastDeviceList;
+    std::unordered_set<std::string> mSensorUdns;
+    std::vector<WemoDevice> UnavailableCachedDevices();
 };
 
 } // namespace wemo_bridge

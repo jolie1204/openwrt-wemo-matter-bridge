@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=openwemo-bridge-core
 PKG_VERSION:=0.1
-PKG_RELEASE:=21
+PKG_RELEASE:=22
 
 PKG_LICENSE:=BSD-3-Clause
 PKG_BUILD_PARALLEL:=1
@@ -60,7 +60,7 @@ define Build/Compile
 		LDFLAGS="$(TARGET_LDFLAGS) -pthread" \
 		RPATH_FLAGS= \
 		INCLUDES="-I../wemo_engine -I$(STAGING_DIR)/usr/include -I$(STAGING_DIR)/usr/include/upnp" \
-		LIBS="../wemo_engine/libwemoengine.a -lupnp -lixml -lsqlite3 $(STAGING_DIR)/usr/lib/libcrypto.a -latomic -lz"
+		LIBS="../wemo_engine/libwemoengine.a -lupnp -lixml -lsqlite3 -lcrypto -latomic -lz"
 endef
 
 define Package/openwemo-bridge-core/install

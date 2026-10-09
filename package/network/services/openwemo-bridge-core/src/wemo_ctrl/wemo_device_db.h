@@ -45,4 +45,6 @@ int wemo_dev_db_update_capability(sqlite3 *db, int wemo_id, int cap, int value);
 int wemo_dev_db_get_capability(sqlite3 *db, int wemo_id, int cap);
 int wemo_dev_db_update_insight_params(sqlite3 *db, int wemo_id, const char *params);
 int wemo_dev_db_delete_row(sqlite3 *db, int wemo_id);
+void wemo_dev_db_update_motion(int id, int packed, int seen);
+void wemo_dev_db_cached_motion(int id, int *online, int *packed, int *seen);
 #endif /* WEMO_DEVICE_DB_H_ */

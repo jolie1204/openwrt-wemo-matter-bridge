@@ -29,6 +29,9 @@
 #include "wemo_insight.h"
 #include "logger.h"
 #include "wemo_engine.h"
+#include "wemo_device_db.h"
+#include "netcam_motion.h"
+extern sqlite3 *ctrlpt_state_db, *ctrlpt_dev_db;
 
 /*
  * Debian libupnp's list.h defines bool/true and then undefines them, which can
@@ -524,6 +527,7 @@ static int wemo_ctrl_list_devices(struct we_device_list *out)
     for (i = 0; i < count; i++) {
         struct we_device_info *d = &out->items[i];
         int lv;
+        int packed = 0, seen = 0;
         sqlite3_reset(online_stmt);
         sqlite3_clear_bindings(online_stmt);
         sqlite3_bind_int(online_stmt, 1, d->wemo_id);
@@ -537,6 +541,11 @@ static int wemo_ctrl_list_devices(struct we_device_list *out)
         sqlite3_bind_int(cap_stmt, 2, CAP_BINARY);
         if (sqlite3_step(cap_stmt) == SQLITE_ROW) {
             d->state = sqlite3_column_int(cap_stmt, 0) ? 1 : 0;
+        }
+
+        if (d->device_type == WEMO_NETCAM_SENSOR) {
+            wemo_dev_db_cached_motion(d->wemo_id, &d->is_online, &packed, &seen);
+            d->motion_snapshot = netcam_motion_normalize(packed, d->is_online, seen, (long long)time(NULL));
         }
 
         sqlite3_reset(cap_stmt);
@@ -1660,6 +1669,17 @@ void wemo_ipc_send_event(int wemo_id, struct we_state *state_buffer)
     ipchdr.wemo_id = wemo_id;
     ipchdr.cmd = EVENT_STATE;
     ipchdr.size = sizeof(struct we_state);
+    sqlite3_stmt *type = NULL;
+    state_buffer->motion_snapshot = 0;
+    if (sqlite3_prepare_v2(ctrlpt_dev_db, "SELECT device_type FROM wemo_device WHERE wemo_id=?", -1, &type, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(type, 1, wemo_id);
+        if (sqlite3_step(type) == SQLITE_ROW && sqlite3_column_int(type, 0) == WEMO_NETCAM_SENSOR) {
+            int packed = 0, seen = 0;
+            wemo_dev_db_cached_motion(wemo_id, &state_buffer->is_online, &packed, &seen);
+            state_buffer->motion_snapshot = netcam_motion_normalize(packed, state_buffer->is_online, seen, (long long)time(NULL));
+        }
+    }
+    sqlite3_finalize(type);
 
     wemo_ipc_send(&ipchdr, (char *) state_buffer);
 }

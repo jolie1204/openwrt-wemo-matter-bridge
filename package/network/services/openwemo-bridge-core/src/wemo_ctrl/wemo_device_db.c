@@ -829,7 +829,9 @@ void wemo_dev_db_insert(sqlite3 *db, struct wemoDevice *dev)
 
     memset(version, 0, sizeof(version));
 
-    if (wemo_dev_parse_version(dev->firmwareVersion, dev->UDN, dev->modelName, version, sizeof(version), &type)) {
+    if (wemo_dev_parse_version(dev->firmwareVersion, dev->UDN, dev->modelName, version, sizeof(version), &type) ||
+        !strcmp(dev->deviceType, "urn:Belkin:device:NetCamSensor:1")) {
+        if (!strcmp(dev->deviceType, "urn:Belkin:device:NetCamSensor:1")) type = WEMO_NETCAM_SENSOR;
         rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
         if (rc != SQLITE_OK) {
             LOG_ERROR_MSG("failed preparing device upsert: %s", sqlite3_errmsg(db));
@@ -1176,8 +1178,10 @@ int wemo_dev_db_get_capability(sqlite3 *db, int wemo_id, int cap)
         {
             state_cache_entry_t *e = state_cache_get_locked(wemo_id, 1);
             if (e != NULL) {
-                e->capability[cap] = value;
-                e->capability_valid[cap] = 1;
+                if (!e->capability_valid[cap]) {
+                    e->capability[cap] = value;
+                    e->capability_valid[cap] = 1;
+                } else value = e->capability[cap];
             }
         }
         pthread_mutex_unlock(&state_cache_lock);
@@ -1194,8 +1198,10 @@ int wemo_dev_db_get_capability(sqlite3 *db, int wemo_id, int cap)
             {
                 state_cache_entry_t *e = state_cache_get_locked(wemo_id, 1);
                 if (e != NULL) {
-                    e->capability[cap] = value;
-                    e->capability_valid[cap] = 1;
+                    if (!e->capability_valid[cap]) {
+                        e->capability[cap] = value;
+                        e->capability_valid[cap] = 1;
+                    } else value = e->capability[cap];
                 }
             }
             pthread_mutex_unlock(&state_cache_lock);
@@ -1327,4 +1333,32 @@ int wemo_dev_db_prune_stale(sqlite3 *dev_db, sqlite3 *state_db, int stale_after_
     }
     sqlite3_finalize(retire_stmt);
     return retired;
+}
+
+/* Snapshot and observation time move together; list and push share this cache. */
+void wemo_dev_db_update_motion(int id, int packed, int seen)
+{
+    pthread_mutex_lock(&state_cache_lock);
+    state_cache_entry_t *e = state_cache_get_locked(id, 1);
+    if (e) {
+        e->capability[CAP_MOTION_SNAPSHOT] = packed;
+        e->capability[CAP_MOTION_SEEN] = seen;
+        e->capability_valid[CAP_MOTION_SNAPSHOT] = e->capability_valid[CAP_MOTION_SEEN] = 1;
+        e->dirty_cap[CAP_MOTION_SNAPSHOT] = e->dirty_cap[CAP_MOTION_SEEN] = 1;
+    }
+    pthread_mutex_unlock(&state_cache_lock);
+}
+void wemo_dev_db_cached_motion(int id, int *online, int *packed, int *seen)
+{
+    /* Seed missing cache fields from disk, then read the pair under one lock. */
+    (void)wemo_dev_db_get_capability(state_cache_db, id, CAP_MOTION_SNAPSHOT);
+    (void)wemo_dev_db_get_capability(state_cache_db, id, CAP_MOTION_SEEN);
+    pthread_mutex_lock(&state_cache_lock);
+    state_cache_entry_t *e = state_cache_find_locked(id);
+    if (e) {
+        if (e->is_online_valid) *online = e->is_online;
+        if (e->capability_valid[CAP_MOTION_SNAPSHOT]) *packed = e->capability[CAP_MOTION_SNAPSHOT];
+        if (e->capability_valid[CAP_MOTION_SEEN]) *seen = e->capability[CAP_MOTION_SEEN];
+    }
+    pthread_mutex_unlock(&state_cache_lock);
 }

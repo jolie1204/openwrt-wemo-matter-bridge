@@ -63,7 +63,7 @@ int wemoCtrlPointRetrieveState(int wemo_id, struct we_state *state_data)
         ithread_mutex_lock( &DeviceListMutex );
         rc = wemoCtrlPointGetDevice( dev_id, &devnode );
         if( CTRLPT_SUCCESS == rc ) {
-            actionNode = UpnpMakeAction("GetBinaryState",
+            actionNode = UpnpMakeAction(!strcmp(devnode->device.deviceType, "urn:Belkin:device:NetCamSensor:1") && !devnode->device.motion_action_legacy ? "GetMotionStatus" : "GetBinaryState",
                                         wemoServiceType[WEMO_SERVICE_BASICEVENT],
                                         0,
                                         NULL);

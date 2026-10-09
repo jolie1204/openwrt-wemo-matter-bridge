@@ -102,6 +102,7 @@ void EmitStateEvent(int wemo_id, const struct we_state & data)
         ev.is_online = (data.is_online != 0);
         ev.state     = data.state;
         ev.level     = data.level;
+        ev.motion_snapshot = data.motion_snapshot;
         gStateCallback(ev);
     }
 }
@@ -133,6 +134,14 @@ std::vector<WemoDevice> WemoAdapterOpenWemo::Discover()
     return ListCachedDevices();
 }
 
+std::vector<WemoDevice> WemoAdapterOpenWemo::UnavailableCachedDevices()
+{
+    std::lock_guard<std::mutex> lock(mCacheMutex);
+    auto cached = mLastDeviceList;
+    for (auto &device : cached) if (device.is_sensor) { device.is_online = false; device.motion_snapshot &= 1; }
+    return cached;
+}
+
 std::vector<WemoDevice> WemoAdapterOpenWemo::ListCachedDevices()
 {
     std::vector<WemoDevice> devices;
@@ -148,11 +157,12 @@ std::vector<WemoDevice> WemoAdapterOpenWemo::ListCachedDevices()
     if (rc != WE_STATUS_OK)
     {
         std::fprintf(stderr, "wemo_adapter: we_list_devices failed rc=%d\n", rc);
-        return devices;
+        return UnavailableCachedDevices();
     }
 
     std::lock_guard<std::mutex> lock(mCacheMutex);
     mUdnToWemoId.clear();
+    mSensorUdns.clear();
 
     const int count = std::clamp(list.count, 0, WE_DEVICE_LIST_MAX_ITEMS);
     for (int i = 0; i < count; i++)
@@ -168,11 +178,13 @@ std::vector<WemoDevice> WemoAdapterOpenWemo::ListCachedDevices()
         device.model_name       = info.model_name;
         device.serial_number    = info.serial_number;
         device.firmware_version = info.firmware_version;
+        device.is_sensor        = (info.device_type == WEMO_NETCAM_SENSOR);
+        device.motion_snapshot  = info.motion_snapshot;
         device.is_online        = (info.is_online != 0);
         device.onoff            = static_cast<uint8_t>(info.state ? 1 : 0);
         // Some firmware reports a generic device_type even for dimmers but
         // still provides a valid level (0-100).
-        device.supports_level = (info.device_type == kTypeDimmer) || (info.level >= 0);
+        device.supports_level = !device.is_sensor && ((info.device_type == kTypeDimmer) || (info.level >= 0));
         device.is_plug        = (info.device_type == kTypeSwitch) || (info.device_type == kTypeMini) ||
             (info.device_type == kTypeInsight);
         if (info.level >= 0)
@@ -183,10 +195,12 @@ std::vector<WemoDevice> WemoAdapterOpenWemo::ListCachedDevices()
         if (!device.udn.empty())
         {
             mUdnToWemoId[device.udn] = device.wemo_id;
+            if (device.is_sensor) mSensorUdns.insert(device.udn);
         }
 
         devices.push_back(std::move(device));
     }
+    mLastDeviceList = devices;
 #endif
 
     return devices;
@@ -245,6 +259,7 @@ void WemoAdapterOpenWemo::PollStates()
             state.is_online = info.is_online;
             state.state     = info.state;
             state.level     = info.level;
+            state.motion_snapshot = info.motion_snapshot;
             polled.push_back({ info.wemo_id, state });
         }
     }
@@ -284,6 +299,7 @@ bool WemoAdapterOpenWemo::SetOnOff(const std::string & udn, bool on)
     // Fast path: cache lookup
     {
         std::lock_guard<std::mutex> lock(mCacheMutex);
+        if (mSensorUdns.count(udn)) return false;
         auto it = mUdnToWemoId.find(udn);
         if (it != mUdnToWemoId.end())
         {
@@ -303,8 +319,10 @@ bool WemoAdapterOpenWemo::SetOnOff(const std::string & udn, bool on)
             if (list.items[i].udn[0] != '\0')
             {
                 mUdnToWemoId[list.items[i].udn] = list.items[i].wemo_id;
+                if (list.items[i].device_type == WEMO_NETCAM_SENSOR) mSensorUdns.insert(list.items[i].udn);
             }
         }
+        if (mSensorUdns.count(udn)) return false;
         auto it = mUdnToWemoId.find(udn);
         if (it != mUdnToWemoId.end())
         {
@@ -334,6 +352,7 @@ bool WemoAdapterOpenWemo::SetLevelPercent(const std::string & udn, uint8_t perce
     // Fast path: cache lookup
     {
         std::lock_guard<std::mutex> lock(mCacheMutex);
+        if (mSensorUdns.count(udn)) return false;
         auto it = mUdnToWemoId.find(udn);
         if (it != mUdnToWemoId.end())
         {
@@ -353,8 +372,10 @@ bool WemoAdapterOpenWemo::SetLevelPercent(const std::string & udn, uint8_t perce
             if (list.items[i].udn[0] != '\0')
             {
                 mUdnToWemoId[list.items[i].udn] = list.items[i].wemo_id;
+                if (list.items[i].device_type == WEMO_NETCAM_SENSOR) mSensorUdns.insert(list.items[i].udn);
             }
         }
+        if (mSensorUdns.count(udn)) return false;
         auto it = mUdnToWemoId.find(udn);
         if (it != mUdnToWemoId.end())
         {

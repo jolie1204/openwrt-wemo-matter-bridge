@@ -3,6 +3,7 @@
 #include <sqlite3.h>
 
 #include <filesystem>
+#include <charconv>
 #include <string>
 
 namespace wemo_bridge {
@@ -45,29 +46,33 @@ std::optional<uint16_t> QueryEndpointId(sqlite3 * db, const std::string & udn)
     std::optional<uint16_t> result = std::nullopt;
     if (sqlite3_step(stmt) == SQLITE_ROW)
     {
-        result = static_cast<uint16_t>(sqlite3_column_int(stmt, 0));
+        const sqlite3_int64 id = sqlite3_column_int64(stmt, 0);
+        if (id >= 2 && id < 0xfffe) result = static_cast<uint16_t>(id);
     }
 
     sqlite3_finalize(stmt);
     return result;
 }
 
-uint16_t QueryNextEndpointId(sqlite3 * db)
+uint16_t QueryNextEndpointId(sqlite3 * db, uint16_t firstId)
 {
     sqlite3_stmt * stmt = nullptr;
     const char * sql    = "SELECT value FROM bridge_meta WHERE key = 'next_endpoint_id';";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK)
     {
-        return kFirstDynamicEndpointId;
+        return firstId;
     }
 
-    uint16_t next_id = kFirstDynamicEndpointId;
+    uint16_t next_id = firstId;
     if (sqlite3_step(stmt) == SQLITE_ROW)
     {
         const char * value = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
         if (value != nullptr)
         {
-            next_id = static_cast<uint16_t>(std::stoi(value));
+            unsigned int parsed = 0;
+            const auto end = value + std::char_traits<char>::length(value);
+            const auto conversion = std::from_chars(value, end, parsed);
+            next_id = conversion.ec == std::errc{} && conversion.ptr == end && parsed >= firstId && parsed < 0xfffe ? static_cast<uint16_t>(parsed) : 0xffff;
         }
     }
     sqlite3_finalize(stmt);
@@ -110,7 +115,7 @@ bool InsertMapping(sqlite3 * db, const std::string & udn, uint16_t endpoint_id)
 
 } // namespace
 
-EndpointRegistry::EndpointRegistry(std::string path) : mPath(std::move(path)) {}
+EndpointRegistry::EndpointRegistry(std::string path, uint16_t firstEndpointId) : mPath(std::move(path)), mFirstEndpointId(firstEndpointId) {}
 
 std::optional<uint16_t> EndpointRegistry::Lookup(const std::string & udn) const
 {
@@ -170,12 +175,17 @@ std::optional<uint16_t> EndpointRegistry::GetOrAssign(const std::string & udn)
     const auto existing = QueryEndpointId(db, udn);
     if (existing.has_value())
     {
-        ExecSql(db, "COMMIT;");
+        if (*existing < mFirstEndpointId) { ExecSql(db, "ROLLBACK;"); sqlite3_close(db); return std::nullopt; }
+        const bool committed = ExecSql(db, "COMMIT;");
+        if (!committed) ExecSql(db, "ROLLBACK;");
         sqlite3_close(db);
-        return existing;
+        return committed ? existing : std::nullopt;
     }
 
-    const uint16_t endpoint_id = QueryNextEndpointId(db);
+    const uint16_t endpoint_id = QueryNextEndpointId(db, mFirstEndpointId);
+    if (endpoint_id < mFirstEndpointId || endpoint_id >= 0xfffe) {
+        ExecSql(db, "ROLLBACK;"); sqlite3_close(db); return std::nullopt;
+    }
     const uint16_t next_id     = static_cast<uint16_t>(endpoint_id + 1);
 
     if (!InsertMapping(db, udn, endpoint_id) || !UpsertNextEndpointId(db, next_id))
@@ -185,9 +195,10 @@ std::optional<uint16_t> EndpointRegistry::GetOrAssign(const std::string & udn)
         return std::nullopt;
     }
 
-    ExecSql(db, "COMMIT;");
+    const bool committed = ExecSql(db, "COMMIT;");
+    if (!committed) ExecSql(db, "ROLLBACK;");
     sqlite3_close(db);
-    return endpoint_id;
+    return committed ? std::optional<uint16_t>(endpoint_id) : std::nullopt;
 }
 
 } // namespace wemo_bridge

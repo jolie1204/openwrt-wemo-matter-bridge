@@ -885,7 +885,7 @@ static int we_fetch_cached_device_list_once(struct we_device_list *out)
     if ((int)(sizeof(struct we_proto_hdr) + rsp_proto->payload_len) > rsp_ipchdr.size) {
         return WE_STATUS_INVALID;
     }
-    if (rsp_proto->payload_len < sizeof(struct we_device_list)) {
+    if (rsp_proto->payload_len != sizeof(struct we_device_list)) {
         return WE_STATUS_INVALID;
     }
     memcpy(out, rsp_buf + sizeof(struct we_proto_hdr), sizeof(*out));
@@ -2084,7 +2084,7 @@ void *we_comm_task(void *args)
                         we_callback.netstate_callback(ipchdr.wemo_id, (struct we_network_status *)ipc_data);
                     break;
                 case EVENT_STATE:
-                    if (ipchdr.size < (int) sizeof(struct we_state)) {
+                    if (ipchdr.size != (int) sizeof(struct we_state)) {
                         fprintf(stderr, "EVENT_STATE payload too short (%d)\n", ipchdr.size);
                         break;
                     }

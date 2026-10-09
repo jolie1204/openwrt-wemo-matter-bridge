@@ -17,6 +17,8 @@ struct WemoDevice
     std::string firmware_version;
     bool supports_level = false;
     bool is_plug = false;
+    bool is_sensor = false;
+    int motion_snapshot = 0;
     bool is_online = false;
     uint8_t onoff = 0;
     uint8_t level_percent = 0; // 0..100

@@ -14,6 +14,7 @@ struct WemoStateEvent
     bool is_online;
     int state;  // 0=off, 1=on
     int level;  // 0-100 or -1
+    int motion_snapshot = 0;
 };
 
 using StateEventCallback = std::function<void(const WemoStateEvent &)>;
