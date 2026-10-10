@@ -222,6 +222,132 @@ serial 증거는 private에 보관합니다. 이 단계는 transfer나 flash 명
 vendor dual-slot fallback을 복구 수단으로 선언하지 않습니다. 새 DTS는
 vendor dual-slot layout과 다르므로 임의 bootB fallback은 금지합니다.
 
+### 실제 bootloader 코드와 RAM boot의 명령 주의
+
+host의 별도 `../uboot-snsv2/u-boot` ELF 및 `System.map`을 읽어 보관한
+`private/netcam-firmware-upgrade-2026-10-09/preflight/mtd0-u-boot.bin`과 대조했습니다.
+`.text` 76320 bytes, `.data` 752 bytes, `.data.rel.local` 1964 bytes,
+`.got` 1056 bytes, command table 456 bytes는 모두 일치했습니다. 두 rodata
+section에는 각각 9 bytes 차이가 있어 ELF 전체 동일성은 주장하지 않습니다.
+아래 분기에 쓰이는 `run_command` GOT 주소와 `save`,
+`setenv bootargs ${boot_A_args}` literal은 actual dump에서도 확인했습니다.
+별도 U-Boot repo의 소스·빌드 산출물은 수정하지 않았습니다.
+
+`do_bootm`은 `0xBC00A5F4`에 있고, `argc < 2` 검사는 `0xBC00A678`의
+`slti`와 `0xBC00A67C`의 branch입니다. 인자 없는 경로는 global `load_addr`를
+읽고 `0xBC00A688`에서 `0xBC00A974`로 이동합니다. 반면 **인자가 있는
+`bootm ADDRESS`는 bootstate 0/1일 때 ADDRESS를 boot A flash 주소로
+덮어쓰며**, bootargs가 다르면 boot A args로 교체한 뒤 `save`도 실행합니다.
+일반 U-Boot의 `bootm RAM_ADDRESS` 예제를 이 장치에 그대로 사용하지 않습니다.
+
+인자 없는 분기는 네 번의 `run_command` 호출이 있는 인자 처리 영역을
+우회합니다. 뒤에 호출되는 `check_boot_process`의 실제 opcode도 확인했습니다.
+`0xBC00A1A4/0xBC00A1AC`에서 bootstate 문자 `1`/`3`만 변경 경로로 들어가며
+문자 `0`은 `0xBC00A228` return으로 이동합니다. `do_bootm`에 별도 direct
+`saveenv` 호출은 없습니다. 따라서 **bootstate 0 확인 + 인자 없는 bootm**은
+코드 분석상 이 env 쓰기 경로를 우회합니다. 이는 아직 실제 RAM 부팅을
+성공시킨 검증이 아닙니다.
+
+`tftpboot ADDRESS FILE`은 global `load_addr`를 ADDRESS로 지정합니다.
+그러나 TFTP 함수에는 autostart=yes이고 modifies 조건이 참이면 `saveenv`를
+호출하는 코드가 있습니다(actual GOT call `0xBC00BFB0`). 따라서 다운로드
+전에 `autostart=no`, `autoscript=no`를 **RAM에서만** 설정합니다.
+`save`, `saveenv`, menu의 flash update 항목, `erase`, `cp`, `spi write`는
+RAM/transfer 검증에서 실행하지 않습니다. 테스트 후 정상 reset으로 기존
+flash 부팅을 재개하고 host에 보관한 protected env hash를 반드시 대조합니다.
+
+### full initramfs의 64 MiB RAM 예산 검사
+
+actual serial은 DRAM 64 MB를 보고했습니다. KSEG0 RAM 범위는 이 장치에서
+`0x80000000..0x83ffffff`이며 RAM top은 exclusive `0x84000000`입니다.
+OpenWrt ramips pipeline은 kernel+DTB를 LZMA로 압축한 legacy uImage,
+load address `0x80000000`을 생성합니다. 현재 full build는 embedded initramfs도
+LZMA를 사용하므로 outer kernel 압축과 inner cpio 압축을 구분해야 합니다.
+**압축 파일 크기만으로 RAM 부팅 가능하다고 판단하지 않습니다.**
+
+완성된 image에 대해 다음 자료를 host에서 읽어 기록합니다.
+
+1. legacy uImage header magic, header CRC, payload CRC, arch/type/compression,
+   payload size, load `L`, entry address를 확인합니다. `mkimage -l` 또는 host
+   header parser를 사용하며 `sysupgrade.bin`을 initramfs kernel로 혼동하지 않습니다.
+2. payload를 host에서만 decompress해 실제 outer 출력 길이 `U`를 구하고
+   LZMA header의 알려진 출력 길이와 비교합니다. 이 vendor decoder는 unknown
+   length `0xffffffffffffffff`를 거부합니다. 기본 Python `FORMAT_ALONE` 압축
+   산출물을 검토 없이 대신 쓰지 않습니다. OpenWrt의 `staging_dir/host/bin/lzma`
+   pipeline과 실제 header를 사용합니다.
+3. 대응하는 `vmlinux-initramfs`의 `readelf -lW` LOAD memory 범위 및
+   `_end`/BSS 범위를 읽습니다. `E`는 `L+U`, ELF LOAD의 memory end, kernel
+   end 중 가장 큰 RAM 주소로 잡아, decompressed bytes 외의 BSS 초기화가
+   staging buffer를 덮는 것도 차단합니다.
+4. UART에서 `bdinfo`가 제공하면 memstart/memsize/boot_params를 private에
+   읽어 U-Boot relocation, malloc, boot parameters와 stack의 상단 점유를
+   확인합니다. 소스는 RAM top에서 code, malloc, 128 KiB boot parameters,
+   stack을 예약합니다. RAM top 전체를 TFTP용 free memory로 사용하지 않습니다.
+5. `S`를 TFTP staging 시작, `C`를 header 포함 image 총 길이,
+   `T`를 검토한 U-Boot 상단 예약보다 낮은 안전한 exclusive limit으로 잡습니다.
+   `L < E < S`, `S+C <= T < 0x84000000`을 충분한 alignment/guard와 함께
+   만족해야 합니다. `0x82000000`은 검토 후보이지 무조건 안전한 주소가 아닙니다.
+   기본 vendor load `0x80100000`은 outer decompression과 겹칠 수 있으므로
+   RAM kernel에 사용하지 않습니다.
+6. inner cpio를 host에서만 decompress해 regular-file bytes와 각 파일의
+   page rounding, rootfs metadata, kernel runtime/allocator/page tables 여유를
+   추가 산정합니다. peak에는 embedded compressed cpio가 든 kernel과
+   새로 풀린 rootfs가 동시에 존재합니다. 실제 shell boot 뒤 `/proc/meminfo`의
+   확인 전에는 계산만으로 운영 안정성을 주장하지 않습니다.
+
+OpenWrt generic `/init`은 root 전체를 새 tmpfs로 복사한 후 procd를 실행합니다.
+이 시험에서는 **`rdinit=/bin/sh init=/bin/sh root=/dev/ram0`**를 temporary
+bootargs에 사용해 그 copy와 daemon 시작을 우회합니다. kernel 6.12.74
+`init/main.c`를 읽어 명시적 `init` 실패는 panic으로 끝나는 것을 확인했습니다.
+rdinit만 지정하면 shell 파일은 존재하지만 dynamic loader가 실패하는 경우
+`/sbin/init` fallback이 생길 수 있으므로 두 shell 옵션을 함께 사용합니다.
+기존 `root=/dev/mtdblock2`를 그대로 남기지 않습니다. host에서 `/bin/sh`,
+BusyBox와 실제 ELF interpreter/shared libraries, cpio console node를 확인하고
+kernel의 CMDLINE override가 temporary args를 무시하지 않는지도 확인합니다.
+
+검토가 통과한 뒤 사용할 UART 순서는 다음입니다. 아래 주소는 위 예산 조건을
+통과한 경우의 예시이며 이 문서를 쓰면서 실행하지 않았습니다.
+
+```text
+printenv bootstate
+setenv autostart no
+setenv autoscript no
+setenv bootargs console=ttyS0,57600n8 rdinit=/bin/sh init=/bin/sh root=/dev/ram0
+tftpboot 0x82000000 recovery-initramfs.bin
+# 전송 크기와 image/header/CRC를 확인한 뒤에만, ADDRESS 인자 없이:
+bootm
+```
+
+`bootstate`가 0이 아니면 진행하지 않습니다. `ipaddr`/`serverip`/netmask 설정도
+필요하면 volatile 값만 사용하고 private 기록에만 둡니다. PID 1 shell에서는
+proc/sysfs의 필요한 읽기 경로만 마련하고 `/data`나 flash root를 mount하지
+않습니다. `/init`, `/sbin/init`, controller/app, provisioning, sysupgrade를
+실행하지 않습니다. 실제 `/proc/mounts`와 process 상태로 이 조건을 확인해야 합니다.
+
+full image가 overlap/peak RAM 조건을 통과하지 못하면 현재 full-build config,
+staging/build directory를 변경하지 않습니다. kernel 빌드가 끝난 뒤 별도
+kernel source/output 복사본과 minimal cpio(BusyBox shell, 필요한 loader/libraries,
+console node만 포함)를 사용해 별도 image를 만들 수 있습니다. 같은 DTS를
+사용하고 위 image/ELF 검사를 다시 수행합니다. 현재 kernel tree를 복사하는
+동안 full build가 해당 파일을 쓰는 방식이나 공유 output에 두 make를 동시에
+실행하는 방식은 사용하지 않습니다. minimal image도 아직 만들지 않았습니다.
+
+### 먼저 가능한 transfer-only 확인
+
+RAM image를 boot하지 않고 작은 공개 fixture를 TFTP로 RAM에 받는 시험이
+가능합니다. 별도 TFTP root에는 그 fixture만 두고 private 백업·keys·DB는
+포함하지 않습니다. PC dnsmasq는 별도 process에서 `--conf-file=/dev/null`,
+`--port=0`, `--enable-tftp`, eth0의 확인한 LAN 주소/전용 TFTP root만 지정하고
+DHCP range는 설정하지 않습니다. 기존 DNS/DHCP 서비스는 변경하지 않습니다.
+
+U-Boot에서 bootstate 0, autostart/autoscript no를 먼저 확인하고, bounds 내의
+명시적 RAM 주소로 fixture를 받습니다. 실제 `crc32`가 지원되면 host CRC32와
+비교하고 아니면 알려진 짧은 marker를 `md.b`로 확인합니다. 이 명령은 RAM만
+읽습니다. **이 시험에서는 bootm도 실행하지 않습니다.** 정상 reset 복귀와
+protected partition/env hashes를 확인한 뒤 fixture server를 종료합니다.
+성공 시에는 TFTP 전송+기존 flash 재부팅을 검증했다고 기록하며, kernel RAM
+부팅이나 flash write 복구를 검증했다고 확대하지 않습니다.
+
 보관한 raw `mtd8-firmware.bin`은 전송 size/SHA 일치를 확인한 dump입니다.
 immutable kernel/squashfs는 보존됐으나 mounted JFFS2 overlay의 파일 간
 일관성은 보증하지 않습니다. 일관된 raw restore point가 필요하면 stopped-state
