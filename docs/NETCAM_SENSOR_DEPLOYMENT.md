@@ -135,6 +135,76 @@ private 배포 기록에 남깁니다. 현재 문서만으로 조건 통과를 �
 
 ## 사전 보존
 
+### 기존 UniqueID 보존
+
+2026-10-09 기존 FW를 재부팅한 뒤 실제 서버 등록 상태를 다시 읽었습니다.
+기존 동적 endpoint 14개의 ID/type/revision/parent는 모두 같았으나 UniqueID는
+모두 바뀌었습니다. 기존 upstream `Device::GenerateUniqueId()`의 무작위 생성
+동작입니다. 새 FW 설치로 인한 퇴행으로 해석하지 않습니다.
+
+Matter r24는 모든 WeMo endpoint에 canonical UDN 기반 identity DB
+`/data/wemo-matter/endpoint_identity.db`를 사용합니다. UUID scheme만 소문자로
+정규화하고 UDN 본문은 보존합니다. 기존 UID를 우선 사용하며, 신규 UID는
+SQLite transaction의 COMMIT 성공 후에만 publication에 사용합니다. schema,
+UDN/UID 유일성, UID 길이, private 파일 권한, 조회/쓰기 오류는 fail closed로
+처리합니다. identity 저장 실패 시 해당 endpoint를 게시하지 않습니다.
+운영 daemon은 기존 DB를 READWRITE로만 열고 파일 크기/SQLite header와
+모든 seed 행의 TEXT type/canonical UDN/유효 UID를 검사합니다. DB가 삭제되거나
+0-byte/손상 상태이면 새 DB를 만들거나 새 UID를 발급하지 않습니다. SQLite
+`synchronous=EXTRA`로 COMMIT을 보존하고, 이미 게시한 canonical UDN 또는
+UniqueID와 중복되는 새 endpoint도 거부합니다.
+기존 endpoint allocator와 fabric은 변경하지 않습니다. DB 경로는 개발용
+`WEMO_ENDPOINT_IDENTITY_DB`로 재지정할 수 있으나 실제 운영에서는 `/data`를
+마운트한 기본 경로를 사용합니다.
+
+새로운 uncommissioned 설치만 명시적인 offline provisioning을 사용합니다.
+다음 도구는 새 private 경로에 strict 빈 DB를 만들어 최초 서비스 시작 전에
+복사할 수 있도록 합니다. 기존 파일을 덮어쓰지 않으며 boot 시 자동 호출하지
+않습니다. C++의 `EndpointIdentityRegistry::InitializeEmpty`도 최초 provisioning
+전용이고 runtime publication 경로에서는 호출하지 않습니다.
+
+```sh
+python3 tools/initialize_matter_endpoint_identity_db.py \
+  --output private/fresh-provisioning/endpoint_identity.db
+```
+
+이미 commissioned된 브리지에서 DB 손실을 이 초기화로 숨기지 않습니다.
+보존 DB/검증된 seed를 복구해야 합니다. 이번 운영 배포에는 빈 DB 대신 아래
+원래 14개 UID가 들어 있는 migration seed를 사용합니다.
+
+첫 설치에서는 새 daemon을 시작하기 전에 정확한 기존 UID seed를 넣습니다.
+private migration 자료는
+`private/netcam-firmware-upgrade-2026-10-09/endpoint-identity-migration/`의
+`original-identity-seed.json`, `endpoint_identity.db`입니다. 실행 중인
+`gBridgedWemoLights.device`와 `gDevices`를 포인터로 정확히 연결한 14개 UDN이
+원래 SQLite DB의 canonical UDN과 일치하며, 각 집합에서 유일한 원래/현재/DB의
+bounded name, endpoint ID/type/revision/parent도 모두 일치했습니다. 원래
+재부팅 전 캡처에 직접 UDN 포인터를 읽지 않았던 한계는 seed JSON에 기록했습니다.
+이름 또는 순서만으로 UID를 배정하지 않습니다. 23일 uptime 당시의 원래 UID를
+보존했으며, 재부팅 후 새 무작위 UID를 seed로 사용하지 않습니다.
+
+이 seed는 로컬 파일로만 만들었고 이 절을 작성할 때 운영 DB에는 설치하지
+않았습니다. 실제 설치 시 모든 관련 서비스를 정지한 상태에서 원본 seed 해시,
+DB integrity/schema/14개 binding, 기존 DB 존재 여부 및 백업을 확인한 뒤
+0600으로 설치합니다. 기존 identity DB가 있으면 무조건 덮어쓰지 않습니다.
+이후 새 app 시작과 추가 재시작에서 원래 14개의 UDN/UID 및 endpoint mapping을
+비교하고, Google Home 기존 기기 기능도 검증해야 합니다.
+
+읽기 도구는 `tools/read_matter_endpoint_baseline.py`입니다. `manifest`에
+matching unstripped ELF, cross GDB, 운영 ELF SHA256을 제공하고 `capture`에
+같은 ELF/manifest, strict SSH host, 새 private 출력 경로를 제공합니다.
+`--include-bindings`를 두 단계 모두 지정하면 DWARF vector/string layout을
+해석하여 정확한 UDN/device-pointer binding과 bounded name을 private에만
+기록합니다. 새로운 FW는 새로운 matching ELF로 manifest를 재생성합니다.
+출력은 개수만 표시하며 0700 부모/0600 파일과 no-overwrite를 적용합니다.
+
+새 identity registry host test가 기존 `run_netcam_tests.py`에 추가되어
+현재 여섯 suite를 실행합니다. 앞의 다섯 suite 검증은 당시 이력입니다.
+새 registry의 재시작/순서 독립성, legacy seed, UID 충돌, corrupt schema/value,
+COMMIT lock 오류, private 파일 권한 및 publication 전 실패 처리와 읽기 도구의
+경계/포인터 binding 회귀를 검증합니다. target image 빌드와 실제 seed 설치 후
+UID 유지/Google Home 수락은 별도 실기 검증입니다.
+
 strict SSH host-key 검증을 유지합니다. legacy SCP가 필요하면 `scp -O`를
 사용하고 전송 후 size/SHA를 대조합니다. SSH 알고리즘 예외는 해당 WeMo
 host에만 적용합니다. 별도 controller commissioning을 추가하지 않습니다.

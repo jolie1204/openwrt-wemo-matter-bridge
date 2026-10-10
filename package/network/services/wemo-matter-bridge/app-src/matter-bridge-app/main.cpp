@@ -1,4 +1,5 @@
 #include "wemo_bridge/endpoint_registry.h"
+#include "wemo_bridge/endpoint_identity_registry.h"
 #include "wemo_bridge/sensor_endpoint_id_guard.h"
 #include "wemo_bridge/published_slot.h"
 #include "wemo_bridge/motion_sensor_state.h"
@@ -1820,6 +1821,15 @@ void NotifyBridgePartsListChanged()
 
 bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList = true)
 {
+    static_assert(Device::kDeviceUniqueIdSize == 32, "Persistent endpoint identity width must match Device");
+    const auto canonicalUdn = wemo_bridge::CanonicalIdentityUdn(dev.udn);
+    if (!canonicalUdn) return false;
+    for (const auto & existing : gBridgedWemoLights) {
+        if (existing.device && wemo_bridge::CanonicalIdentityUdn(existing.udn) == canonicalUdn) {
+            ChipLogError(DeviceLayer, "Duplicate canonical endpoint identity; device not published");
+            return false;
+        }
+    }
     const size_t endpointCapacity = CHIP_DEVICE_CONFIG_DYNAMIC_ENDPOINT_COUNT;
     if (ActiveWemoEndpointCount() >= endpointCapacity)
     {
@@ -1911,6 +1921,27 @@ bool PublishWemoDevice(const wemo_bridge::WemoDevice & dev, bool notifyPartsList
     const size_t clusterCount = slot->is_sensor ? MATTER_ARRAY_SIZE(bridgedOccupancyClusters) : slot->is_dimmable ? MATTER_ARRAY_SIZE(bridgedDimmableLightClusters) :
                                 slot->is_plug     ? MATTER_ARRAY_SIZE(bridgedOnOffPlugClusters) :
                                                     MATTER_ARRAY_SIZE(bridgedLightClusters);
+
+    const char * identityPath = std::getenv("WEMO_ENDPOINT_IDENTITY_DB");
+    wemo_bridge::EndpointIdentityRegistry identities(identityPath ? identityPath : "/data/wemo-matter/endpoint_identity.db");
+    slot->device->GenerateUniqueId();
+    const auto identity = identities.GetOrAssign(slot->udn, slot->device->GetUniqueId());
+    if (!identity) {
+        ChipLogError(DeviceLayer, "Endpoint identity persistence failed; device not published");
+        wemo_bridge::ClearUnpublishedSlot(*slot);
+        return false;
+    }
+    for (const auto & existing : gBridgedWemoLights) {
+        if (&existing != slot && existing.device && *identity == existing.device->GetUniqueId()) {
+            ChipLogError(DeviceLayer, "Duplicate live endpoint UniqueID; device not published");
+            wemo_bridge::ClearUnpublishedSlot(*slot);
+            return false;
+        }
+    }
+    // Device::SetUniqueId logs the private identity. Copy the validated, bounded
+    // value quietly before publication so AddDeviceEndpoint never generates it.
+    std::memset(slot->device->GetUniqueId(), 0, Device::kDeviceUniqueIdSize + 1);
+    std::memcpy(slot->device->GetUniqueId(), identity->data(), identity->size());
 
     wemo_bridge::SensorEndpointIdGuard sensorIdGuard(gCurrentEndpointId, slot->is_sensor);
     if (slot->is_sensor) {

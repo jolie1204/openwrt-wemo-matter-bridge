@@ -138,6 +138,22 @@ def generate_manifest(args):
         'type_id': '(unsigned long)&((EmberAfDeviceType*)0)->deviceTypeId',
         'type_revision': '(unsigned long)&((EmberAfDeviceType*)0)->deviceTypeRevision',
     }
+    if args.include_bindings:
+        slot = "'(anonymous namespace)::BridgedWemoLight'"
+        vector = "'(anonymous namespace)::gBridgedWemoLights'"
+        expressions.update({
+            'bindings_address': f'(unsigned long)&{vector}',
+            'bindings_size': f'sizeof({vector})',
+            'bindings_start': f'(unsigned long)&({vector}._M_impl._M_start) - (unsigned long)&{vector}',
+            'bindings_finish': f'(unsigned long)&({vector}._M_impl._M_finish) - (unsigned long)&{vector}',
+            'binding_size': f'sizeof({slot})',
+            'binding_device': f'(unsigned long)&(({slot}*)0)->device',
+            'binding_device_size': f'sizeof((({slot}*)0)->device)',
+            'binding_udn_pointer': f'(unsigned long)&(({slot}*)0)->udn._M_dataplus._M_p',
+            'binding_udn_size': f'(unsigned long)&(({slot}*)0)->udn._M_string_length',
+            'object_name': '(unsigned long)&((Device*)0)->mName',
+            'object_name_size': 'sizeof(((Device*)0)->mName)',
+        })
     command = [args.gdb, '-nx', '-batch', '-iex', 'set auto-load off', args.debug_elf]
     for expression in expressions.values():
         command.extend(['-ex', 'p/u ' + expression])
@@ -169,6 +185,14 @@ def validate_manifest(manifest, debug):
     elf = parse_elf(debug)
     for address, size in ((m['devices_address'], m['devices_size']), (m['endpoints_address'], m['endpoints_size'])):
         require(any(p[0] == 1 and p[6] & 2 and p[2] <= address and address + size <= p[2] + p[5] for p in elf['programs']), 'Table outside writable ELF LOAD')
+    if 'bindings_address' in m:
+        require(m['binding_device_size'] == 4 and 0 < m['bindings_size'] <= 64 and 0 < m['binding_size'] <= 1024, 'Unsupported binding pointer/vector layout')
+        require(0 < m['object_name_size'] <= 64 and m['object_name'] + m['object_name_size'] <= m['object_size'], 'Invalid bounded name layout')
+        for field in ('bindings_start', 'bindings_finish'):
+            require(m[field] + 4 <= m['bindings_size'], 'Vector field outside layout')
+        for field in ('binding_device', 'binding_udn_pointer', 'binding_udn_size'):
+            require(m[field] + 4 <= m['binding_size'], 'Binding field outside layout')
+        require(any(p[0] == 1 and p[6] & 2 and p[2] <= m['bindings_address'] and m['bindings_address'] + m['bindings_size'] <= p[2] + p[5] for p in elf['programs']), 'Binding vector outside writable ELF LOAD')
     return m
 
 
@@ -214,7 +238,36 @@ def read_ranges(remote, pid, maps, ranges):
     return blocks
 
 
-def capture_sample(remote, pid, base, maps, m):
+def capture_bindings(remote, pid, base, maps, m, active):
+    header_ranges = [(base + m['bindings_address'] + m[field], 4) for field in ('bindings_start', 'bindings_finish')]
+    header = read_ranges(remote, pid, maps, header_ranges)
+    start, finish = [int.from_bytes(x, 'little') for x in header]
+    require(finish >= start and (finish - start) % m['binding_size'] == 0, 'Invalid binding vector bounds')
+    count = (finish - start) // m['binding_size']
+    require(count <= m['devices_size'] // 4, 'Binding vector exceeds endpoint capacity')
+    ranges = []
+    for i in range(count):
+        ranges.extend([(start + i * m['binding_size'] + m[field], 4) for field in ('binding_device', 'binding_udn_pointer', 'binding_udn_size')])
+    blocks = read_ranges(remote, pid, maps, ranges)
+    entries, udn_ranges = [], []
+    for i in range(count):
+        device, pointer, size = [int.from_bytes(x, 'little') for x in blocks[i * 3:i * 3 + 3]]
+        if not device:
+            continue
+        require(device in active.values(), 'Binding device does not match registered pointer')
+        require(6 <= size <= 256, 'Invalid bounded UDN string length')
+        entries.append(device); udn_ranges.append((pointer, size))
+    require(len(entries) == len(active) and len(set(entries)) == len(entries), 'Binding-to-device pointer join incomplete')
+    bindings = {}
+    for device, data in zip(entries, read_ranges(remote, pid, maps, udn_ranges)):
+        require(all(33 <= c <= 126 for c in data) and data[:5].lower() == b'uuid:', 'Invalid canonical UDN')
+        bindings[device] = 'uuid:' + data[5:].decode('ascii')
+    require(len(set(bindings.values())) == len(bindings), 'Duplicate canonical UDN binding')
+    require(header == read_ranges(remote, pid, maps, header_ranges), 'Binding vector changed during capture')
+    return bindings
+
+
+def capture_sample(remote, pid, base, maps, m, include_bindings=False):
     pointers = read_ranges(remote, pid, maps, [(base + m['devices_address'], m['devices_size'])])[0]
     active = [(i // 4, struct.unpack_from('<I', pointers, i)[0]) for i in range(0, len(pointers), 4) if struct.unpack_from('<I', pointers, i)[0]]
     ranges = [(base + m['endpoints_address'], m['endpoints_size'])]
@@ -227,6 +280,14 @@ def capture_sample(remote, pid, base, maps, m):
         unique, endpoint, parent = blocks[1 + i * 3:4 + i * 3]
         require(b'\0' in unique, 'UniqueID not terminated')
         devices.append({'slot': slot, 'unique_id_hex': unique.split(b'\0', 1)[0].hex(), 'endpoint': int.from_bytes(endpoint, 'little'), 'parent': int.from_bytes(parent, 'little')})
+    if include_bindings:
+        require('bindings_address' in m, 'Manifest lacks requested binding DWARF layout')
+        bindings = capture_bindings(remote, pid, base, maps, m, dict(active))
+        names = read_ranges(remote, pid, maps, [(address + m['object_name'], m['object_name_size']) for _, address in active])
+        for device, (_, address), name in zip(devices, active, names):
+            require(b'\0' in name, 'Name not terminated')
+            device['canonical_udn'] = bindings[address]
+            device['name_hex'] = name.split(b'\0', 1)[0].hex()
     endpoints, type_ranges = [], []
     for offset in range(0, len(table), m['endpoint_size']):
         entry = table[offset:offset + m['endpoint_size']]
@@ -268,8 +329,8 @@ def capture(args):
             start = (base + p[2]) & ~4095
             offset = p[1] & ~4095
             require(any(x['path'] == EXE and x['start'] <= start < x['end'] and x['offset'] + start - x['start'] == offset for x in maps), 'LOAD mapping mismatch')
-    first = capture_sample(remote, pid, base, maps, m)
-    second = capture_sample(remote, pid, base, maps, m)
+    first = capture_sample(remote, pid, base, maps, m, args.include_bindings)
+    second = capture_sample(remote, pid, base, maps, m, args.include_bindings)
     require(first == second, 'Endpoint snapshots changed; repeat when stable')
     require(remote.pid() == pid, 'PID changed during capture')
     record = {'schema': 1, 'timestamp_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'operating_sha256': manifest['operating_sha256'], 'debug_sha256': manifest['debug_sha256'], 'manifest': manifest, 'pid': pid, 'verified_allocated_sections': sections, 'stable_samples': 2, 'capture': first, 'limitations': 'Server memory baseline, not commissioned Descriptor PartsList read or Google Home cache acknowledgement; process was not halted.'}
@@ -285,11 +346,13 @@ def main():
     make.add_argument('--gdb', required=True)
     make.add_argument('--operating-sha256', required=True)
     make.add_argument('--output', required=True)
+    make.add_argument('--include-bindings', action='store_true', help='Resolve exact UDN/device-pointer join and bounded private name layout')
     read = sub.add_parser('capture', help='Strict SSH read-only capture to a fresh private file')
     read.add_argument('--host', required=True)
     read.add_argument('--debug-elf', required=True)
     read.add_argument('--manifest', required=True)
     read.add_argument('--output', required=True)
+    read.add_argument('--include-bindings', action='store_true', help='Record exact UDN/device-pointer bindings and bounded private names for migration')
     args = parser.parse_args()
     os.umask(0o077)
     try:

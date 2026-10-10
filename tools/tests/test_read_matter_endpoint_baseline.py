@@ -135,7 +135,9 @@ class LayoutAndRaceTests(unittest.TestCase):
                     address, count = int(address), int(count)
                     chunks.append(memory[address:address + count])
                 return b''.join(chunks)
-        return Remote(), layout, [{'start': 0, 'end': len(memory), 'permissions': 'rw-p'}]
+        remote = Remote()
+        remote.memory = memory
+        return remote, layout, [{'start': 0, 'end': len(memory), 'permissions': 'rw-p'}]
 
     def test_relocated_layout_captured_without_name_or_heap_dump(self):
         remote, layout, maps = self.fixture()
@@ -153,6 +155,37 @@ class LayoutAndRaceTests(unittest.TestCase):
         remote, layout, maps = self.fixture(mismatch=True)
         with self.assertRaisesRegex(ValueError, 'registration tables'):
             baseline.capture_sample(remote, 10, 0x1000, maps, layout)
+
+    def bindings_fixture(self):
+        remote, layout, maps = self.fixture()
+        layout.update({'bindings_address': 0x300, 'bindings_start': 0, 'bindings_finish': 4,
+                       'binding_size': 32, 'binding_device': 4, 'binding_udn_pointer': 12,
+                       'binding_udn_size': 16, 'object_name': 16, 'object_name_size': 16})
+        memory = remote.memory
+        struct.pack_into('<II', memory, 0x1300, 0x4000, 0x4020)
+        struct.pack_into('<I', memory, 0x4004, 0x5000)
+        struct.pack_into('<II', memory, 0x400c, 0x7000, 14)
+        memory[0x7000:0x700e] = b'UUID:fixture-a'
+        memory[0x5010:0x5020] = b'fixture-name\0xxx'
+        return remote, layout, maps
+
+    def test_private_binding_joins_exact_pointer_and_canonicalizes_scheme(self):
+        remote, layout, maps = self.bindings_fixture()
+        capture = baseline.capture_sample(remote, 10, 0x1000, maps, layout, True)
+        self.assertEqual(capture['devices'][0]['canonical_udn'], 'uuid:fixture-a')
+        self.assertEqual(capture['devices'][0]['name_hex'], b'fixture-name'.hex())
+
+    def test_binding_pointer_mismatch_is_not_resolved_by_name(self):
+        remote, layout, maps = self.bindings_fixture()
+        struct.pack_into('<I', remote.memory, 0x4004, 0x5100)
+        with self.assertRaisesRegex(ValueError, 'registered pointer'):
+            baseline.capture_sample(remote, 10, 0x1000, maps, layout, True)
+
+    def test_oversized_binding_udn_rejected_before_string_read(self):
+        remote, layout, maps = self.bindings_fixture()
+        struct.pack_into('<I', remote.memory, 0x4010, 257)
+        with self.assertRaisesRegex(ValueError, 'bounded UDN'):
+            baseline.capture_sample(remote, 10, 0x1000, maps, layout, True)
 
 
 if __name__ == '__main__':

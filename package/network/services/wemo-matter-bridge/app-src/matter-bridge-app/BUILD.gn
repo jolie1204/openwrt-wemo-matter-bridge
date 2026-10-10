@@ -24,6 +24,7 @@ executable("wemo-bridge-app") {
     "main.cpp",
     "../src/adapters/wemo/wemo_adapter_openwemo.cpp",
     "../src/matter/endpoint_registry.cpp",
+    "../src/matter/endpoint_identity_registry.cpp",
   ]
 
   deps = [
