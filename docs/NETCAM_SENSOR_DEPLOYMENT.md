@@ -24,23 +24,34 @@ fabric을 유지해야 합니다. 일반 사용자용 릴리스 안내에 추가
 
 ## 현재 검증 상태
 
-새 core r22 / Matter r24 full firmware의 clean build와 실제 운영 장치
-설치를 완료했습니다. first-boot hold가 실제로 적용됐고, service 시작 전
-기존 data 파일 전체·onboarding·보호 분할의 hash 일치를 확인했습니다.
-빌드/이미지와 UART 복구·설치 절차는
-[펌웨어 빌드](NETCAM_BRIDGE_FIRMWARE_BUILD.md) 및
+Core r23 / Matter r25 full firmware의 clean build, 실제 설치와 운영 서비스
+재개를 완료했습니다. first-boot hold가 적용됐고, 서비스 시작 전 기존 data
+파일 전체·onboarding·보호 분할의 hash 일치를 확인했습니다. 빌드/이미지와
+UART 복구·설치 절차는 [펌웨어 빌드](NETCAM_BRIDGE_FIRMWARE_BUILD.md) 및
 [펌웨어 설치](NETCAM_BRIDGE_FIRMWARE_UPGRADE.md)에 기록했습니다.
 
-원래 장기 실행 UniqueID 14개를 담은 endpoint_identity.db를 root 0600으로
-설치해 해시와 SQLite integrity를 검증하고 원래 service enable 상태를
-복원했습니다. 새 실행 ELF와 24 allocated sections를 대조한 read-only
-메모리 캡처 두 번이 같았으며 원래 14개 UID/ID/type/revision/parent와 exact
-canonical UDN 소유권을 모두 보존했습니다. 전체 registered endpoint 17개도
-같았습니다. fabric이 재개됐으며 재commissioning은 하지 않았습니다.
+최초 r24 시험에서 발견한 Matter stack mutex 재획득과 controller의 SQLite
+cursor/cache 잠금 순환을 수정했습니다. 새 실행에서는 controller snapshot이
+15개를 반환하며 초기 로그에 DB locked / IPC list_devices 실패가 없습니다.
 
-NetCam 신규 발견과 Google Home 실제 제어, 재시작 후 identity 유지는
-별도로 검증 중입니다. 최초 실행 시에는 기존 14개만 발견돼 camera UPnP
-경로를 확인하고 있습니다. 아래 APK와 미설치 서술은 이전 단계의 이력입니다.
+기존 endpoint_identity.db 15개를 재seed 없이 사용했습니다. 실제 실행 ELF의
+24 allocated sections를 대조하고 두 번 안정된 read-only 메모리 캡처에서
+원래 14개 canonical UDN/UID/ID/type/revision/parent 모두 보존을 확인했습니다.
+NetCam 1개도 r24에서 할당된 UDN/UID/endpoint/parent를 유지했습니다. 실제
+DeviceType은 Occupancy Sensor 0x0107 revision 4 및 Bridged Node 0x0013이며,
+전체 dynamic device 15개 / registered endpoint 18개입니다. 재commissioning은
+하지 않았습니다.
+
+Galaxy S20+의 기존 Google Home fabric에서 허용된 Hallway 조명을 켜고 실제
+기기의 직접 SOAP 상태로 켜짐을 확인했습니다. Google Home에서 다시 꺼
+원래 상태로 복원됐음을 확인했습니다. 첫 3초 화면 상태는 늦게 반영되어
+재시도에서는 UI 수렴을 기다렸습니다. 첫 시도의 안전 복원은 직접 SOAP로
+수행했고, 두 번째 시도는 Google Home 켜기·끄기 양쪽이 통과했습니다. Mini
+008은 조작하지 않았습니다.
+
+NetCam SOAP는 idle / DetectionAvailable=1입니다. 실제 움직임의 Matter 전달,
+Google Home 센서 화면 및 재시작 후 identity 유지는 이어서 검증합니다.
+아래 APK와 미설치 서술은 이전 단계의 이력입니다.
 
 ### 이전 SDK package 검증 이력
 
