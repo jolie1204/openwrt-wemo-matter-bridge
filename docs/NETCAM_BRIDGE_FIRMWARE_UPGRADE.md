@@ -476,3 +476,26 @@ TFTP 서버는 PC의 지정 LAN 주소에만 bind하고 DNS/DHCP를 끕니다. �
 initramfs 파일 하나만 0644로 변경한 뒤 성공했습니다. private 부모
 디렉터리는 0700을 유지하며 백업·로그·credentials를 served root에 두지
 않습니다. 시험 원본과 상세 결과는 ignored private 폴더에 보관했습니다.
+
+## 실제 설치 직전 정지 백업 (2026-10-09)
+
+기존 14 dynamic endpoint와 전체 17 registered endpoint의 ID/type/revision/parent가
+원래 기준과 같았습니다. exact canonical UDN binding 14개 모두 legacy UID
+seed 소유권과 맞았고 seed의 UID 14개도 원래 장기 실행 기준을 유지했습니다.
+기존 코드가 reboot 때 UID를 새로 생성하는 문제 때문에 새 random UID를
+보존 기준으로 삼지 않았습니다.
+
+원래 enabled인 세 서비스를 기록하고 watchdog → app → controller 순으로
+정지했습니다. procd stop은 즉시 완료되지 않을 수 있으므로 종료를 기다린
+뒤 두 번 process 부재를 확인했습니다. 정지 후 data tar 296 members와
+SQLite `.backup` 3개를 보관했습니다. target 및 host quick_check는 모두 ok,
+보호 대상 네 분할의 해시도 사전 백업과 같았습니다. 상세 hash와 private
+설정은 ignored `final-stopped-backup/`에만 보관합니다.
+
+신규 sysupgrade archive에서 data 227 members를 제외하고 etc만 29 members
+유지했으며 0755 hold script를 확인했습니다. 전체 `/etc` 복구 tar에는
+absolute symlink가 있어 curator의 안전 검사를 통과하지 않습니다. 이 tar는
+복구 자료로만 보관하고 추가 입력은 필요한 regular 설정 파일만 골라 만든
+`etc-selected-additions.tar.gz`를 사용했습니다. 검사 완화는 하지 않았습니다.
+
+이 기록은 아직 새 firmware flash 또는 첫 부팅 검증 완료를 뜻하지 않습니다.
