@@ -523,3 +523,30 @@ flash가 완료됐고 kernel panic은 없었습니다.
 실제 UID seed 설치, 서비스 재개, Google Home 확인은 이 첫 부팅 검증과
 별도로 진행합니다. 상세 원본은 ignored `first-boot-verification/`와 UART
 로그에만 보관합니다.
+
+## 실제 Core r23 / Matter r25 설치 및 첫 부팅 (2026-10-09)
+
+첫 r24 운영 시험에서 발견한 Matter stack mutex 재획득과 SQLite cursor/cache
+잠금 순환을 수정한 full image를 설치했습니다. target/host image 및 curated
+archive 해시 일치, `sysupgrade -T -f` exit 0, 정확한 board와 서비스 정지,
+보호 분할/data/onboarding 불변을 다시 확인한 뒤 `sysupgrade -f`를 실행했습니다.
+UID seed를 다시 생성하거나 fabric을 재commissioning하지 않았습니다.
+
+정지 백업은 SQLite 5개 quick_check ok와 data tar 298 members를 포함합니다.
+etc만 29 members인 archive를 사용했고 `/data` 복원을 포함하지 않았습니다.
+UART 57600에서 flash 완료와 새 kernel 부팅을 확인했습니다. SSH가 준비될
+때까지 기다렸으며 DHCP 주소는 설치 전과 같았습니다.
+
+서비스 시작 전 검증이 모두 통과했습니다.
+
+- 세 서비스 모두 stopped/disabled, `/data` 실제 JFFS2 mount.
+- `/data` 모든 regular file 해시, onboarding, U-Boot/env/Factory/Config 해시 보존.
+- controller SHA-256 `5964c9cbc27395dde4bf3b5b962972c206be90e4d1859a37fda06b34ebcc8009`.
+- Matter app SHA-256 `fe7473dac8e40bd67af53f5138cd4a09ddc47d9f279720513c78f4c30204c29d`.
+- flash 불변 prefix 7,794,299 bytes SHA-256
+  `c9934340b814796d80aeb793609f453fb979840499628c4d28d4d1c32af55da0`,
+  새 image와 일치.
+
+기존 endpoint identity 15개는 재seed 없이 유지합니다. 서비스 재개 이후의
+Google Home 제어, 센서, restart 검증은 별도 운영 검증 단계입니다. 상세
+백업·UART·검증 원본은 ignored private 폴더에만 보관했습니다.
