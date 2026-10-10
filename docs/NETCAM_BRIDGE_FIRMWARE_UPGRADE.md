@@ -586,3 +586,24 @@ Google Home Hallway 제어 재시험은 UI와 실제 상태가 일치하지 않�
 HD pause/recovery와 실제 움직임의 end-to-end acceptance는 보류합니다.
 이전 UART 무응답의 원인을 이번 link 문제로 단정하지 않으며 process memory
 검사는 반복하지 않았습니다. private UART/SQLite/hash/UI evidence만 보관합니다.
+
+## 케이블 재연결 설명 및 실제 제어 복귀
+
+사용자가 LAN 케이블을 뺐다가 꽂았다고 알려주었습니다. 앞서 관측한 link
+변화에는 사용자 조작이 포함되므로 자체 Ethernet 장애 또는 새 firmware
+회귀로 단정하지 않습니다. 사용자 설명 이후 UART 관측 구간에는 새 link
+down이 없었습니다. 동일 controller/app PID와 carrier=1을 반복 확인했고,
+온라인 기기는 0개에서 14개로 복귀했습니다. 초기 UDP receive queue 경고도
+한 번 있었지만 후속 health 검사들은 통과했습니다. 장기 안정성 증명은 아닙니다.
+
+같은 commissioned fabric에서 Google Home Hallway ON/OFF를 다시 실행했고
+각 변경을 실제 기기의 SOAP 상태로 확인했으며 시험 전 상태를 복원했습니다.
+이는 이번 재부팅 후 기존 조명의 실제 제어 복귀 증거입니다. 카메라 SOAP은
+idle, DetectionAvailable=1, BinaryState=0입니다. 움직임의 true 전환 및
+이번 전원 재시작 후 HD/Matter availability 재시험은 별도입니다.
+
+읽기 전용 kernel 검토에서는 업데이트 전 flash kernel과 현재 kernel의
+PHY/link 관련 핵심 8개 함수가 byte 단위로 같았습니다. 전체 kernel 동일성
+또는 하드웨어 정상 판정을 의미하지 않습니다. notify_proto Permission denied는
+netifd teardown/setup-abort 도중 callback 거절 경로로 설명 가능하며, 사용자
+계정 권한 문제로 해석하지 않습니다. 추가 firmware/network 변경은 하지 않았습니다.
