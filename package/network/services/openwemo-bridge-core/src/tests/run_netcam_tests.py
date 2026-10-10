@@ -29,3 +29,5 @@ with tempfile.TemporaryDirectory(prefix="netcam-bridge-tests-") as temporary:
     run([temp/"identity-registry",temp/"endpoint_identity.db"],source)
     run(["g++", "-std=c++17", "-DHAVE_OPENWEMO_ENGINE=1", "-I", APP/"include", "-I", source/"wemo_engine", APP/"tests/netcam_adapter_test.cpp", APP/"src/adapters/wemo/wemo_adapter_openwemo.cpp", "-pthread", "-o", temp/"adapter"],source)
     run([temp/"adapter"],source)
+    run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread", "-I", APP/"include", APP/"tests/stack_lock_if_needed_test.cpp", "-o", temp/"stack-lock"],source)
+    run([temp/"stack-lock"],source)

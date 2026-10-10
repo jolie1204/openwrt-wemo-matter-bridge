@@ -1,3 +1,4 @@
+#include "wemo_bridge/stack_lock_if_needed.h"
 #include "wemo_bridge/endpoint_registry.h"
 #include "wemo_bridge/endpoint_identity_registry.h"
 #include "wemo_bridge/sensor_endpoint_id_guard.h"
@@ -80,6 +81,10 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+#if !CHIP_STACK_LOCK_TRACKING_ENABLED
+#error "Safe endpoint mutation requires CHIP stack lock owner tracking"
+#endif
 
 using namespace chip;
 using namespace chip::app;
@@ -568,7 +573,7 @@ int AddDeviceEndpoint(Device * dev, EmberAfEndpointType * ep, const Span<const E
             while (true)
             {
                 // Todo: Update this to schedule the work rather than use this lock
-                DeviceLayer::StackLock lock;
+                wemo_bridge::StackLockIfNeeded lock(PlatformMgr());
                 dev->SetEndpointId(gCurrentEndpointId);
                 dev->SetParentEndpointId(parentEndpointId);
 #if !CHIP_CONFIG_USE_ENDPOINT_UNIQUE_ID
@@ -616,7 +621,7 @@ int RemoveDeviceEndpoint(Device * dev)
         if (gDevices[index] == dev)
         {
             // Todo: Update this to schedule the work rather than use this lock
-            DeviceLayer::StackLock lock;
+            wemo_bridge::StackLockIfNeeded lock(PlatformMgr());
             // Silence complaints about unused ep when progress logging
             // disabled.
             [[maybe_unused]] EndpointId ep = emberAfClearDynamicEndpoint(index);

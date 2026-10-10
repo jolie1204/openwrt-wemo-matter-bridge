@@ -335,3 +335,32 @@ core/Matter 링크가 현재 checkout의 `package/network/services/`를 가리�
 확인한 뒤, core clean/compile → Matter clean/compile을 순서대로 수행합니다.
 새 빌드 시 ABIv3 헤더/engine archive 및 copied-source hashes를 다시 대조하고
 APK manifest를 새로 기록합니다. APK가 바뀌면 위 고정 해시의 새 검토가 필요합니다.
+
+## r24 실행 중 발견한 정체와 후속 수정
+
+첫 실행의 14개 legacy identity는 보존됐지만 이후 Google Home 조명 시험은
+오프라인으로 표시됐고 physical SOAP state는 원래 상태 그대로였습니다.
+실제 CASE 인증/성공 ACK는 있었으므로 fabric을 초기화하지 않았습니다.
+controller IPC timeout, state DB locked, Matter UDP receive queue 증가와
+watchdog의 자동 재시작을 관측했습니다. 해당 시점의 메모리 여유는 약
+18 MiB였고 OOM/panic/hung-task 진단은 없었습니다.
+
+지속 연결 discovery 관측에서는 controller cache 15개 중 NetCam 1개를
+확인했습니다. 재시작된 r24 프로세스의 15 binding/15 active device/18 registered
+endpoint와 exact canonical UDN을 대조했습니다. 새 프로세스에서 정상 등록을
+관측한 사실이 이전 프로세스의 정체를 반증하지는 않습니다.
+
+Add/RemoveDeviceEndpoint는 startup뿐 아니라 stack mutex를 이미 보유한
+Matter scheduled reconciliation에서도 호출됩니다. POSIX nonrecursive mutex를
+무조건 다시 잡는 경로를 현재 owner일 때 재획득하지 않는 RAII guard로
+수정했습니다. 실제 SDK의 owner tracking을 요구하며 tracking이 꺼진 빌드는
+명시적으로 거부합니다. startup, already-owned add/remove/error-return host
+회귀 시험 및 전체 7개 host suite를 통과했습니다. Claude 독립 검토도 guard
+로직의 구체적인 결함을 찾지 못했습니다. 테스트에서 NDEBUG가 assertion의
+부작용을 제거하는 문제는 assertion 유지 후 `-DNDEBUG` 실행으로 확인했습니다.
+
+이 source 수정은 Matter r25에 포함합니다. 실제 controller 캐시/SQLite 잠금
+순환에 대한 별도 수정과 최종 image/Google Home 수락은 아직 진행 중입니다.
+CLI discovery는 asynchronous send 후 바로 EOF를 주면 controller가 이미
+받은 frame을 버릴 수 있으므로 검증 때 stdin/socket을 유지했습니다.
+`wemo_client`는 argv command를 실행하지 않으며 stdin 명령을 사용합니다.
