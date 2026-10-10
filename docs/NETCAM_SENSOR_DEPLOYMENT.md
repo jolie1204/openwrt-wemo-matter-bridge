@@ -49,8 +49,22 @@ Galaxy S20+의 기존 Google Home fabric에서 허용된 Hallway 조명을 켜�
 수행했고, 두 번째 시도는 Google Home 켜기·끄기 양쪽이 통과했습니다. Mini
 008은 조작하지 않았습니다.
 
-NetCam SOAP는 idle / DetectionAvailable=1입니다. 실제 움직임의 Matter 전달,
-Google Home 센서 화면 및 재시작 후 identity 유지는 이어서 검증합니다.
+Google Home 센서 상세 화면은 사람 감지 / 감지되지 않음을 표시했습니다.
+controlled service restart 후에도 기존 14개와 NetCam의 UID/ID/type/revision/
+parent/canonical binding 15개, 전체 endpoint 18개가 유지됐습니다.
+
+최초 HD 시험에서는 SOAP paused/available0 동안 Matter Reachable=true가
+남는 불일치가 있었습니다. 당시 GENA 전달 성공은 확인하지 못했습니다.
+서비스 재시작을 캡처하자 SUBSCRIBE HTTP200과 초기 idle NOTIFY HTTP200을
+확인했습니다. 초기 NOTIFY ACK는 약17초 걸렸습니다. 새 HD 시험에서는
+paused NOTIFY 및 HTTP200, Matter Reachable=false와 종료 후 idle NOTIFY 및
+Reachable=true 복귀를 실제로 확인했습니다. 이 전환은 source 변경 없이
+성공했으며 최초 구독/전달 누락의 원인은 확정하지 않았습니다. 동일
+Location 재발견에서 failed SID의 재구독을 하지 않는 경로는 잠재 회복성
+제약이며, 실제 구독 실패가 재현될 경우 제한된 재시도를 검토합니다.
+
+정상 reboot 뒤 초기 구독과 동일 전환을 다시 확인합니다. 실제 사람이
+움직인 positive Occupancy 전환은 아직 검증하지 않았습니다.
 아래 APK와 미설치 서술은 이전 단계의 이력입니다.
 
 ### 이전 SDK package 검증 이력
