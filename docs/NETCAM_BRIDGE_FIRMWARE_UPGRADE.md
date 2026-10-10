@@ -607,3 +607,15 @@ PHY/link 관련 핵심 8개 함수가 byte 단위로 같았습니다. 전체 ker
 또는 하드웨어 정상 판정을 의미하지 않습니다. notify_proto Permission denied는
 netifd teardown/setup-abort 도중 callback 거절 경로로 설명 가능하며, 사용자
 계정 권한 문제로 해석하지 않습니다. 추가 firmware/network 변경은 하지 않았습니다.
+
+## NetCam 온라인 복귀 및 Google Home 표시 확인
+
+추가 읽기 검사에서 NetCam도 online=1, packed snapshot=2(idle/available),
+유효 관측 timestamp로 복귀했습니다. Matter app 로그 역시 ONLINE/OFF를
+반복 반영했습니다. 카메라 SOAP 30회(58.7초)는 모두 idle/available=1/occupancy=0
+였지만 같은 구간 Google Home 상세 화면 12회(57.7초)는 이전 감지됨 표시를
+유지했습니다. 상세 화면을 닫았다 다시 열자 감지되지 않음으로 바뀌었습니다.
+현재 조명 실제 제어와 센서 온라인/미감지 표시를 확인했으나, 화면을 열어 둔
+상태의 실시간 갱신이나 실제 사람 움직임 true 전환은 이 시험으로 입증하지
+않았습니다. 서비스/network 변경, fabric reset 또는 재commissioning 없이
+복귀했으며 케이블 조작 이후 관측에서는 추가 hardware link down이 없었습니다.
