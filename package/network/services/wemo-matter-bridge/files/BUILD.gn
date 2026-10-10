@@ -23,6 +23,7 @@ executable("wemo-bridge-app") {
     "${chip_root}/examples/bridge-app/linux/include/main.h",
     "../src/adapters/wemo/wemo_adapter_openwemo.cpp",
     "../src/matter/endpoint_registry.cpp",
+    "../src/matter/endpoint_identity_registry.cpp",
     "DeviceDimmable.cpp",
     "include/CHIPProjectAppConfig.h",
     "include/DeviceDimmable.h",
