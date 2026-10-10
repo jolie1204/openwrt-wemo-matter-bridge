@@ -1,4 +1,4 @@
-# NetCam 센서 운영 배포 준비
+# NetCam 센서 운영 배포 기록
 
 2026-10-09 기준 개발자용 기록입니다. 기존 플러그·조명의 commissioning과
 fabric을 유지해야 합니다. 일반 사용자용 릴리스 안내에 추가하지 않습니다.
@@ -23,6 +23,26 @@ fabric을 유지해야 합니다. 일반 사용자용 릴리스 안내에 추가
 현재 소스 경로로 사용하지 마세요.
 
 ## 현재 검증 상태
+
+새 core r22 / Matter r24 full firmware의 clean build와 실제 운영 장치
+설치를 완료했습니다. first-boot hold가 실제로 적용됐고, service 시작 전
+기존 data 파일 전체·onboarding·보호 분할의 hash 일치를 확인했습니다.
+빌드/이미지와 UART 복구·설치 절차는
+[펌웨어 빌드](NETCAM_BRIDGE_FIRMWARE_BUILD.md) 및
+[펌웨어 설치](NETCAM_BRIDGE_FIRMWARE_UPGRADE.md)에 기록했습니다.
+
+원래 장기 실행 UniqueID 14개를 담은 endpoint_identity.db를 root 0600으로
+설치해 해시와 SQLite integrity를 검증하고 원래 service enable 상태를
+복원했습니다. 새 실행 ELF와 24 allocated sections를 대조한 read-only
+메모리 캡처 두 번이 같았으며 원래 14개 UID/ID/type/revision/parent와 exact
+canonical UDN 소유권을 모두 보존했습니다. 전체 registered endpoint 17개도
+같았습니다. fabric이 재개됐으며 재commissioning은 하지 않았습니다.
+
+NetCam 신규 발견과 Google Home 실제 제어, 재시작 후 identity 유지는
+별도로 검증 중입니다. 최초 실행 시에는 기존 14개만 발견돼 camera UPnP
+경로를 확인하고 있습니다. 아래 APK와 미설치 서술은 이전 단계의 이력입니다.
+
+### 이전 SDK package 검증 이력
 
 controller r22와 Matter r23은 IPCv3로 함께 빌드됐습니다. host suite 5개,
 paired target clean build, copied-source 비교 및 실제 musl loader 검증은
