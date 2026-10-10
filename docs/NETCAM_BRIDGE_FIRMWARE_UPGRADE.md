@@ -563,3 +563,26 @@ LAN과 UART 명령 응답이 함께 중단됐습니다. panic/OOM 원본은 없�
 확대하지 않습니다. NetCam과 폰 호스트는 응답했습니다. 사용자에게
 브리지만 전원·LED 확인 및 전원 재시작을 요청한 상태이며 UART/TFTP 복구
 준비를 유지합니다. 원본은 ignored private 폴더에 보관했습니다.
+
+## 사용자 전원 재시작 후 복구 및 LAN 불안정 확인
+
+사용자가 브리지 전원을 껐다 켠 뒤 UART shell과 strict SSH가 복귀했습니다.
+정확한 board, 설치된 Core r23/Matter r25 바이너리 SHA-256, onboarding 및
+U-Boot/env/Factory/Config 해시 보존을 재확인했습니다. 기존 identity 15개,
+sensor endpoint mapping과 bridge metadata는 정지 백업과 같았으며 두 live
+SQLite database의 quick_check도 통과했습니다. 이는 저장 상태의 검증이며
+현재 runtime publication 또는 Google Home acknowledgement의 증명이 아닙니다.
+
+후속 UART 관측에서는 rt3050-esw port 0의 hardware link down/up이 반복됐습니다.
+UART shell은 계속 응답했지만 SSH는 간헐적으로 끊겼고 app/controller PID도
+바뀌었습니다. watchdog은 모든 15개 기기가 offline인 상태로 세 번 실패한 뒤
+bridge stack을 재시작했습니다. init scripts는 LAN interface event에 reload를
+등록하고 reload에서 서비스를 다시 시작하므로 link 변화에 따른 재시작도
+가능합니다. watchdog 자체에는 PHY/network reset 명령이 없습니다. 케이블,
+상대 switch, PHY/driver 중 원인은 아직 구분하지 못했습니다.
+
+Google Home Hallway 제어 재시험은 UI와 실제 상태가 일치하지 않아 tap 전에
+중단했습니다. 실제 조명 상태는 시작 전과 같았습니다. 현재 reboot 후 제어,
+HD pause/recovery와 실제 움직임의 end-to-end acceptance는 보류합니다.
+이전 UART 무응답의 원인을 이번 link 문제로 단정하지 않으며 process memory
+검사는 반복하지 않았습니다. private UART/SQLite/hash/UI evidence만 보관합니다.
