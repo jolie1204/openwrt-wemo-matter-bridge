@@ -544,6 +544,10 @@ static int wemo_ctrl_list_devices(struct we_device_list *out)
         }
 
         if (d->device_type == WEMO_NETCAM_SENSOR) {
+            // Release this reader's SHARED SQLite lock before waiting for the
+            // cache mutex: the flusher owns that mutex while writing this DB.
+            sqlite3_reset(online_stmt);
+            sqlite3_reset(cap_stmt);
             wemo_dev_db_cached_motion(d->wemo_id, &d->is_online, &packed, &seen);
             d->motion_snapshot = netcam_motion_normalize(packed, d->is_online, seen, (long long)time(NULL));
         }

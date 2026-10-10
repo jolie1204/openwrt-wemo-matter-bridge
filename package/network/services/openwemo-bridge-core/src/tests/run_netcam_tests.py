@@ -23,6 +23,9 @@ with tempfile.TemporaryDirectory(prefix="netcam-bridge-tests-") as temporary:
     run(common + ["tests/netcam_controller_test.c", temp/"main.o"] + objects + ["-o", temp/"controller", "-lupnp", "-lixml", "-lsqlite3", "-pthread"], source)
     (temp/"db").mkdir()
     run([temp/"controller", temp/"db"], source)
+    cursor_objects = [x for x in objects if x.name != "wemo_device_db.o"] + [source/"wemo_ctrl/wemo_ctrl.o"]
+    run(common + ["tests/netcam_cursor_lock_test.c", temp/"main.o"] + cursor_objects + ["-o", temp/"cursor-lock", "-lupnp", "-lixml", "-lsqlite3", "-pthread"], source)
+    run([temp/"cursor-lock", temp/"db"], source)
     run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I", APP/"include", APP/"tests/sensor_endpoint_registry_test.cpp", APP/"src/matter/endpoint_registry.cpp", "-lsqlite3", "-o", temp/"registry"], source)
     run([temp/"registry",temp/"endpoints.db"],source)
     run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I", APP/"include", APP/"tests/endpoint_identity_registry_test.cpp", APP/"src/matter/endpoint_identity_registry.cpp", "-lsqlite3", "-o", temp/"identity-registry"], source)

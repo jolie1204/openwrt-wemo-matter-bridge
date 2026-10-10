@@ -38,3 +38,5 @@ git-src
 .vscode*
 /private/
 __pycache__/
+
+/artifacts/

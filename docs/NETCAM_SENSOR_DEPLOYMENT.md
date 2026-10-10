@@ -364,3 +364,19 @@ Matter scheduled reconciliation에서도 호출됩니다. POSIX nonrecursive mut
 CLI discovery는 asynchronous send 후 바로 EOF를 주면 controller가 이미
 받은 frame을 버릴 수 있으므로 검증 때 stdin/socket을 유지했습니다.
 `wemo_client`는 argv command를 실행하지 않으며 stdin 명령을 사용합니다.
+
+### Controller r23의 실제 SQLite 잠금 회귀
+
+운영 장치에서 read-only `PRAGMA journal_mode`를 조회한 결과 state/device DB는
+둘 다 DELETE였습니다. source의 WAL 요청이 실제 모드임을 가정하지 않았습니다.
+목록 producer의 online/cap cursor가 SQLITE_ROW 상태로 SHARED read lock을
+유지한 채 NetCam cache mutex를 기다리고, cache flusher는 그 mutex를
+소유한 채 같은 DB에 write하는 순환이 이 설정에서 성립합니다.
+
+NetCam cache를 읽기 직전에 두 cursor를 reset해 reader lock을 해제하도록
+최소 수정했습니다(core r23). 실제 `wemo_ctrl_list_devices`와 실제
+`state_cache_flush_locked`를 사용하는 SQLite DELETE-mode 회귀 시험이
+통과했습니다. 동일 시험에서 reset 두 줄만 제거한 임시 source는 writer
+flush 성공 assertion에 실패해 음성 대조도 확인했습니다. 전체 host suite
+8개가 통과했고 target core도 새 build에 반영됐습니다. 최종 firmware와
+운영 제어 성공 여부는 다시 검증합니다.
