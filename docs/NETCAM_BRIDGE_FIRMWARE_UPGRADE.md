@@ -305,6 +305,60 @@ rdinit만 지정하면 shell 파일은 존재하지만 dynamic loader가 실패�
 BusyBox와 실제 ELF interpreter/shared libraries, cpio console node를 확인하고
 kernel의 CMDLINE override가 temporary args를 무시하지 않는지도 확인합니다.
 
+#### 완성된 full image의 호스트 검증 결과
+
+2026-10-09 full build 산출물
+`bin/targets/ramips/mt76x8/openwrt-ramips-mt76x8-wemo-matter-bridge-initramfs-kernel.bin`의
+SHA256은 `af27e49fcbbabbedc4f1332a9bc2a02dc8c21b1c5ccd3b7876af0bf51ba568e5`입니다.
+legacy header/payload CRC, Linux/MIPS/kernel/LZMA 형식, 정확한 payload 길이를
+검증했습니다. load와 uImage entry는 모두 `0x80000000`입니다. outer LZMA의
+알려진 출력 길이는 실제 host 해제 길이와 일치하며, 출력의 kernel prefix는
+`vmlinux-initramfs`와 byte 단위로 같고 마지막 9,271 bytes는 appended DTB입니다.
+
+| 항목 | 실제 값 |
+| --- | ---: |
+| 압축 image 전체 `C` | 7,603,013 bytes |
+| outer 해제 출력 `U` | 11,995,351 bytes |
+| kernel/BSS 상단 `E` | `0x80ca1900` |
+| staging `S .. S+C` | `0x82000000 .. 0x82740345` (끝 exclusive) |
+| kernel 상단과 staging 사이 | 20,309,760 bytes |
+| inner 압축 cpio / 해제 cpio | 5,576,828 / 20,346,368 bytes |
+| regular files / page 반올림 합계 | 20,231,676 / 21,962,752 bytes |
+| kernel+BSS span | 13,244,672 bytes |
+| inner LZMA dictionary+probability workspace | 1,064,556 bytes |
+
+cpio는 regular 525개, directory 83개, symlink 203개, character node 8개입니다.
+inner LZMA dictionary는 1 MiB이며 `init/initramfs.c`의 flush 경로와
+`lib/decompress_unlzma.c`의 `min(dst_size, dict_size)` allocation 및 probability
+table을 합산했습니다. inner header의 unknown output length는 kernel decoder의
+end-marker 처리로 끝납니다. vendor U-Boot가 처리할 **outer** header는 known
+length이므로 inner/outer의 서로 다른 조건을 혼동하지 않습니다.
+
+kernel+BSS, 풀린 rootfs page, inner workspace와 staging image가 모두 남아
+있다고 보수적으로 합산하면 43,874,993 bytes입니다. runtime/metadata에 **가정한**
+8 MiB를 더하면 52,263,601 bytes이며, U-Boot 상단에 **가정한** 2 MiB를 제외한
+`T=0x83e00000` 아래에서 12,748,111 bytes의 여유가 계산됩니다. 이 가정은 실제
+allocator/slab/page table 및 U-Boot stack 측정값이 아닙니다. 수치상 full image의
+별도 minimal 재빌드는 필요하지 않지만, 실제 UART RAM 부팅과 meminfo는 아직
+검증되지 않았습니다. `/init`의 두 번째 tmpfs copy를 허용하는 예산도 아닙니다.
+
+cpio에서 `/bin/sh -> /bin/busybox`, executable shell, interpreter
+`/lib/ld-musl-mipsel-sf.so.1 -> /lib/libc.so`, 필요한 `libgcc_s.so.1`과 `libc.so`,
+`/dev/console`의 character major/minor `5:1`이 존재합니다. 실제 kernel config는
+`CONFIG_MIPS_CMDLINE_FROM_BOOTLOADER=y`, FROM_DTB/DTB_EXTEND 및 CMDLINE_BOOL은
+비활성입니다. 실제 appended DTB의 chosen에는 일반
+`bootargs="console=ttyS0,57600"`만 있고 **bootargs-override는 없습니다**.
+`arch/mips/kernel/setup.c:bootcmdline_init()`은 이 설정에서 초기 DT bootargs를
+비운 뒤 `arcs_cmdline`을 사용하며, ralink `prom_init_cmdline()`은 U-Boot argv를
+`arcs_cmdline`에 복사합니다. 따라서 source/config/DTB 조건상 temporary U-Boot
+shell bootargs를 채택합니다. 실제 `/proc/cmdline`, PID 1 및 mounts 확인은
+RAM 부팅 이후 별도 필수 gate입니다.
+
+집계 JSON은 ignored private 경로
+`private/netcam-firmware-upgrade-2026-10-09/preflight/initramfs-ram-budget.json`에
+mode 0600 (parent directory 0700)으로 보존합니다. **이 결과는 host 검증이며
+실제 RAM 부팅 성공이나 flash 복구 검증을 뜻하지 않습니다.**
+
 검토가 통과한 뒤 사용할 UART 순서는 다음입니다. 아래 주소는 위 예산 조건을
 통과한 경우의 예시이며 이 문서를 쓰면서 실행하지 않았습니다.
 
@@ -400,3 +454,25 @@ flash 성공의 증거가 아닙니다. 상세 결과는 private preflight 폴�
 numeric/name owner 차이, directory permissions, 모든 host key 검증과
 손상 gzip 오류 처리를 보완했습니다. 실제 fixture suite 결과는 commit
 milestone 기록과 함께 보고합니다.
+
+## 실제 UART RAM 복구 시험 (2026-10-09)
+
+USB2, 57600 8N1, flow control 없음에서 새 initramfs를 TFTP로 RAM에 받아
+실제로 부팅했습니다. `autostart=no`, `autoscript=no`와 임시 bootargs를
+설정한 뒤 `tftpboot 0x82000000 recovery-initramfs.bin`으로 7,603,013 bytes를
+확인했고, **주소 인자 없는 `bootm`**을 실행했습니다. uImage checksum과
+압축 해제는 모두 OK였습니다. PID 1은 `/bin/sh`였으며 `/data`는 mount되지
+않았고 controller/Matter app은 실행되지 않았습니다. MemAvailable은
+30,312 KiB였습니다.
+
+`reboot -f`로 기존 flash 펌웨어에 복귀했고 LAN, strict SSH, `/data` mount와
+기존 서비스의 정상 실행을 확인했습니다. U-Boot, env, Factory, Config 네
+분할의 SHA-256은 사전 백업과 모두 같았습니다. 이 시험에서 flash/erase,
+saveenv, Mini 전원 조작은 실행하지 않았습니다. 아직 새 flash 설치 또는
+rollback image 쓰기의 검증은 아닙니다.
+
+TFTP 서버는 PC의 지정 LAN 주소에만 bind하고 DNS/DHCP를 끕니다. 최초
+전송은 dnsmasq의 파일 읽기 제한으로 permission denied였습니다. 공개
+initramfs 파일 하나만 0644로 변경한 뒤 성공했습니다. private 부모
+디렉터리는 0700을 유지하며 백업·로그·credentials를 served root에 두지
+않습니다. 시험 원본과 상세 결과는 ignored private 폴더에 보관했습니다.
