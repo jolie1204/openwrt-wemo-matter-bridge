@@ -499,3 +499,27 @@ absolute symlink가 있어 curator의 안전 검사를 통과하지 않습니다
 `etc-selected-additions.tar.gz`를 사용했습니다. 검사 완화는 하지 않았습니다.
 
 이 기록은 아직 새 firmware flash 또는 첫 부팅 검증 완료를 뜻하지 않습니다.
+
+## 실제 r24 설치 및 첫 부팅 보존 검증 (2026-10-09)
+
+정지 상태에서 새 image와 curated archive의 host/target SHA-256을 대조했고
+`sysupgrade -T -f` exit 0을 확인한 뒤 승인된 `sysupgrade -f`를 실행했습니다.
+UART에서 firmware unlock/write 119 blocks, 재부팅, checksum 검증과 새
+kernel 부팅을 확인했습니다. 첫 부팅은 overlay 초기화 후 LAN/SSH가
+복귀할 때까지 기다렸습니다. 초기화 중 rootfs busy 진단은 있었지만
+flash가 완료됐고 kernel panic은 없었습니다.
+
+첫 SSH 검사 결과는 다음과 같습니다.
+
+- controller, Matter app, watchdog은 모두 process가 없고 disabled였습니다.
+- `/dev/mtdblock6`의 JFFS2가 `/data`에 실제 mount됐습니다.
+- 시작 전 `/data` regular file 전체 SHA-256 목록은 최종 정지 백업과 같았습니다.
+- onboarding 파일과 U-Boot/env/Factory/Config 네 분할의 SHA-256도 같았습니다.
+- 새 `/usr/sbin/wemo-bridge-app` SHA-256은 빌드 검증값과 같았습니다.
+- flash의 kernel+squashfs 불변 prefix 7,794,511 bytes의 SHA-256은
+  `7cada7deb1f62d12bcb089f43bf40aeeb00399b555b506ab218f11fa72d44122`로
+  image와 일치했습니다. JFFS2 초기화 후 전체 image hash를 비교하지 않습니다.
+
+실제 UID seed 설치, 서비스 재개, Google Home 확인은 이 첫 부팅 검증과
+별도로 진행합니다. 상세 원본은 ignored `first-boot-verification/`와 UART
+로그에만 보관합니다.
