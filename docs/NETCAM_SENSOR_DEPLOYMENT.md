@@ -63,8 +63,20 @@ Reachable=true 복귀를 실제로 확인했습니다. 이 전환은 source 변�
 Location 재발견에서 failed SID의 재구독을 하지 않는 경로는 잠재 회복성
 제약이며, 실제 구독 실패가 재현될 경우 제한된 재시도를 검토합니다.
 
-정상 reboot 뒤 초기 구독과 동일 전환을 다시 확인합니다. 실제 사람이
-움직인 positive Occupancy 전환은 아직 검증하지 않았습니다.
+정상 reboot 직후 세 서비스 자동 시작, identity DB 15개 quick_check ok,
+onboarding과 보호 분할의 해시 보존을 확인했습니다. 이후 runtime baseline의
+read-only `/proc` 메모리 읽기 중 SSH command timeout이 발생했고, 뒤이어
+기존 LAN 주소는 No route to host가 됐습니다. USB2 콘솔 입력에도 새 응답이
+없습니다. 캡처에는 새 kernel 부팅 1회와 정상 shell까지 기록됐으며 panic/
+OOM 기록은 없습니다. NetCam HTTP와 폰 호스트 SSH는 계속 응답하므로 전체
+PC LAN 장애로 확인되지는 않았습니다. 전원/하드웨어/kernel 중 원인은 아직
+미확정입니다.
+
+사용자에게 Matter 브리지만 전원·LED 확인 후 전원 재시작을 요청했습니다.
+UART와 TFTP 복구 준비를 유지합니다. 정상 reboot 이후 최종 runtime identity,
+HD pause/resume와 Google Home 제어 acceptance는 이 응답 단절 때문에
+완료되지 않았습니다. 추가 검증은 연결 회복 후 진행합니다. 실제 사람이
+움직인 positive Occupancy 전환도 아직 검증하지 않았습니다.
 아래 APK와 미설치 서술은 이전 단계의 이력입니다.
 
 ### 이전 SDK package 검증 이력

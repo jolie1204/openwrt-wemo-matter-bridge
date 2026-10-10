@@ -550,3 +550,16 @@ UART 57600에서 flash 완료와 새 kernel 부팅을 확인했습니다. SSH가
 기존 endpoint identity 15개는 재seed 없이 유지합니다. 서비스 재개 이후의
 Google Home 제어, 센서, restart 검증은 별도 운영 검증 단계입니다. 상세
 백업·UART·검증 원본은 ignored private 폴더에만 보관했습니다.
+
+## 정상 재부팅 검사와 후속 응답 단절
+
+Core r23 / Matter r25의 정상 reboot 직후 세 서비스가 자동으로 시작됐고,
+기존 identity registry 15개 및 SQLite quick_check, onboarding과 보호 분할
+해시 보존이 통과했습니다. UART에서 새 kernel과 shell을 확인했습니다.
+
+이후 runtime baseline의 read-only 메모리 검사에서 SSH timeout이 발생했고
+LAN과 UART 명령 응답이 함께 중단됐습니다. panic/OOM 원본은 없으며 원인은
+미확정입니다. 재부팅 직후 보존 검사 통과를 지속 운영 acceptance로
+확대하지 않습니다. NetCam과 폰 호스트는 응답했습니다. 사용자에게
+브리지만 전원·LED 확인 및 전원 재시작을 요청한 상태이며 UART/TFTP 복구
+준비를 유지합니다. 원본은 ignored private 폴더에 보관했습니다.
