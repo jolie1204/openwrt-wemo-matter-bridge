@@ -28,6 +28,36 @@ int main(int argc,char **argv) {
     sqlite3_stmt *stmt=NULL;
     assert(sqlite3_prepare_v2(ctrlpt_dev_db,"SELECT device_type FROM wemo_device",-1,&stmt,NULL)==SQLITE_OK);
     assert(sqlite3_step(stmt)==SQLITE_ROW); assert(sqlite3_column_int(stmt,0)==WEMO_NETCAM_SENSOR); sqlite3_finalize(stmt);
+    /* Rediscovery revives a retired row without allocating a new identity,
+     * both while the node is cached and after it has expired from memory. */
+    for (int expired=0; expired<2; expired++) {
+        if (expired) {
+            assert(wemoCtrlPointRemoveDevice("uuid:NetCamSensor-fixture")==CTRLPT_SUCCESS);
+            assert(GlobalDeviceList==NULL);
+        }
+        assert(sqlite3_exec(ctrlpt_dev_db,
+            "UPDATE wemo_device SET retired=1, retired_at=1, last_seen=1",
+            NULL,NULL,NULL)==SQLITE_OK);
+        wemo_dev_statedb_update_online(ctrlpt_state_db,id,0);
+        doc=ixmlParseBuffer(xml); assert(doc);
+        wemoCtrlPointAddDevice(doc,"http://127.0.0.2:9/setup.xml",300);
+        ixmlDocument_free(doc);
+        assert(GlobalDeviceList && GlobalDeviceList->next==NULL);
+        udn=GlobalDeviceList->device.UDN;
+        assert(wemo_dev_db_retrieve_id(ctrlpt_dev_db,(char*)udn)==id);
+        assert(sqlite3_prepare_v2(ctrlpt_dev_db,
+            "SELECT wemo_id,retired,retired_at,last_seen,ipaddr FROM wemo_device",
+            -1,&stmt,NULL)==SQLITE_OK);
+        assert(sqlite3_step(stmt)==SQLITE_ROW);
+        assert(sqlite3_column_int(stmt,0)==id);
+        assert(sqlite3_column_int(stmt,1)==0 && sqlite3_column_int(stmt,2)==0);
+        assert(sqlite3_column_int64(stmt,3)>1);
+        assert(!strcmp((const char*)sqlite3_column_text(stmt,4),"127.0.0.2"));
+        assert(sqlite3_step(stmt)==SQLITE_DONE); sqlite3_finalize(stmt);
+        struct we_device_list revived;
+        assert(wemo_ctrl_list_devices(&revived)==WE_STATUS_OK);
+        assert(revived.count==1 && revived.items[0].wemo_id==id && revived.items[0].is_online==1);
+    }
     /* Disk is intentionally old while list must match the just-pushed cache. */
     sqlite3_exec(ctrlpt_state_db, "INSERT OR REPLACE INTO state_capability(wemo_id,cap,value) SELECT wemo_id,3,2 FROM state", NULL,NULL,NULL);
     snapshot(udn,"motion","1","1");

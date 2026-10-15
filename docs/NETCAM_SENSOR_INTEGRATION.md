@@ -32,6 +32,32 @@ firmware, fabric, endpoint mapping을 변경하지 않았습니다.
 
 ## 현재 작업 위치
 
+### 재검색/재등록 후속 진단
+
+이전 runtime-lock worktree의 변경은 main의 기존 수정에 모두 포함되어
+있었습니다. 더 오래된 문서/테스트를 다시 반영하지 않고 사용자 요청에 따라
+해당 worktree의 tracked 잔여 변경과 main에 이미 존재하는 중복 미추적 테스트를
+폐기했습니다. main의 구현과 회귀 테스트는 보존했습니다.
+
+브리지 br-lan packet 관측에서 CLI discover가 실제 IPv4 multicast M-SEARCH를
+송출하는 것을 확인했습니다. 같은 구간 SSDP 응답은 관측하지 못했습니다.
+host의 basicevent multicast/unicast 검색에서는 다른 장치 응답 13개를
+받았지만 NetCam 응답은 없었습니다. NetCam UDP 1900에 연결한 unicast
+검색은 Connection refused를 반환했습니다. HTTP description과 SOAP 응답은
+정상입니다. UDP listener 부재와 firewall REJECT를 구분하려면 카메라 내부의
+socket, multicast membership, firewall 및 서비스 상태 확인이 필요합니다.
+카메라 SSH 22/2222 포트도 Connection refused였습니다. 다른 카메라일 수
+있는 VPN 주소의 host key verification 실패는 우회하지 않았습니다.
+
+실제 controller의 AddDevice/DB/list producer 경로에 retired 재등록 회귀
+시험을 추가했습니다. 같은 UDN이 메모리에 남아 있을 때와 제거됐을 때 모두
+기존 wemo_id와 단일 DB 행을 유지하고 retired/retired_at을 해제하며,
+last_seen/IP를 갱신하고 active snapshot에 online으로 복귀함을 확인했습니다.
+변경된 Location 재발견도 포함하며 host suite 8개가 통과했습니다.
+이는 description 수신 이후의 재등록 검증이며 운영 SSDP 복구나 Google Home
+센서 수락 완료를 뜻하지 않습니다. 이번 단계는 테스트/문서 변경이며 운영
+서비스 재시작, firewall 변경, firmware 설치를 수행하지 않았습니다.
+
 2026-10-09 사용자 요청에 따라 기존 `openwrt-wemo-matter-bridge`의 main으로
 작업을 통합했습니다. 아래의 분리 checkout/branch 설명은 최초 검증 이력입니다.
 앞으로 개발과 운영 배포 준비는 기존 디렉터리에서 계속합니다.
