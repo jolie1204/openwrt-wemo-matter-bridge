@@ -2,6 +2,34 @@
 
 이 문서는 개발 검토와 재현을 위한 기록입니다. 일반 사용자용 릴리스 안내나 설정 화면의 지원 기기 목록을 변경하지 않습니다.
 
+## 2026-10-15 개발 재개 확인
+
+최초 `netcam-sensor-integration` worktree는 이미 main으로 통합됐으며 현재
+개발 checkout은 `openwrt-wemo-matter-bridge`입니다. 통합 구현은
+`1560aac26c`, Matter stack 잠금 수정은 `0af53f2070`, SQLite reader 잠금
+수정은 `df654a6c06`에 커밋되어 있습니다. 별도 runtime-lock worktree의
+수정은 이전 작업 잔여본이며 최신 main보다 오래된 테스트/문서가 포함되어
+있으므로 그대로 병합하지 않습니다.
+
+현재 main에서 격리된 host regression suite 8개를 재실행해 모두 통과했습니다.
+운영 브리지는 Core r23 / Matter r25로 실행 중이며 uptime은 약 5일 20시간,
+controller snapshot의 14개 장치가 모두 online입니다. 관측한 Matter report의
+StatusResponse는 SUCCESS였으나 Google Home 화면이나 실제 제어를 시험한
+결과는 아닙니다.
+
+NetCam DB 레코드는 retired 상태이며 재검색 후에도 active snapshot에
+복귀하지 않았습니다. 카메라 UPnP HTTP 서비스의 기본 포트 49152에서 정확한
+NetCamSensor description을 확인했고 브리지에서도 같은 description을
+읽었습니다. host의 GetMotionStatus 응답은 idle / DetectionAvailable=1 /
+BinaryState=0이었습니다. 영상 서비스의 source도 online을 반환했습니다.
+host에서 NetCamSensor ST로 5초 SSDP 검색한 결과 응답은 0개였습니다.
+이 단일 관측만으로 multicast 차단이나 camera daemon 결함을 확정하지 않습니다.
+
+다음 조사 대상은 카메라 SSDP 광고와 M-SEARCH 응답, 브리지 수신 및 retired
+레코드 재활성화 경로입니다. 실제 사람 움직임의 Occupancy 전환과 Google
+Home 실시간 표시 검증도 남아 있습니다. 이번 확인에서 서비스를 재시작하거나
+firmware, fabric, endpoint mapping을 변경하지 않았습니다.
+
 ## 현재 작업 위치
 
 2026-10-09 사용자 요청에 따라 기존 `openwrt-wemo-matter-bridge`의 main으로
